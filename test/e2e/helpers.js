@@ -168,12 +168,33 @@ export async function getCanvasPixels(page, x, y, width, height) {
     const canvas = document.getElementById('edit-surface');
     const ctx = canvas.getContext('2d');
 
-    // Get canvas bounding box to understand coordinate system
-    const rect = canvas.getBoundingClientRect();
-    console.log(`[getCanvasPixels] Canvas bounds: x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height}`);
-    console.log(`[getCanvasPixels] Sampling at canvas coords: (${x}, ${y}), size: ${width}x${height}`);
+    // CRITICAL FIX: The image is centered on the canvas with an offset
+    // We need to find where the actual image starts
+    // The Picture class centers the image using:
+    //   canvasOffX = (canvas.width / 2) - scaledCenterX
+    //   canvasOffY = (canvas.height / 2) - scaledCenterY
+    // For a newly created image, scaledCenterX = imageWidth/2, scaledCenterY = imageHeight/2
+    // So: canvasOffX = (canvas.width - imageWidth) / 2
 
-    const imageData = ctx.getImageData(x, y, width, height);
+    // Get the current picture to find the offset
+    const picture = window.gImageEditor?.currentPicture;
+    if (!picture) {
+      console.error('[getCanvasPixels] No current picture found!');
+      return { data: [], width: 0, height: 0 };
+    }
+
+    // The picture stores scaledCenterX/Y, and we can compute the offset
+    const canvasOffX = Math.trunc((canvas.width / 2) - picture.scaledCenterX);
+    const canvasOffY = Math.trunc((canvas.height / 2) - picture.scaledCenterY);
+
+    console.log(`[getCanvasPixels] Canvas offset: (${canvasOffX}, ${canvasOffY})`);
+    console.log(`[getCanvasPixels] Adjusted coords: (${x + canvasOffX}, ${y + canvasOffY})`);
+
+    // Add offset to sampling coordinates
+    const adjustedX = x + canvasOffX;
+    const adjustedY = y + canvasOffY;
+
+    const imageData = ctx.getImageData(adjustedX, adjustedY, width, height);
 
     // Debug: Show what we got
     const firstPixel = imageData.data;
