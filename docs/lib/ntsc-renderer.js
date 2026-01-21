@@ -268,6 +268,15 @@ export default class NTSCRenderer {
         const width = imageData.width;  // Should be 560 for DHGR NTSC
         const palette = NTSCRenderer.solidPalette;
 
+        // Debug first call
+        if (row === 0 && !this._debugLogged) {
+            this._debugLogged = true;
+            console.log(`[NTSC] First renderHgrScanline call:`);
+            console.log(`  imageData: ${imageData.width}x${imageData.height}`);
+            console.log(`  palette defined: ${palette !== undefined && palette[0] !== undefined}`);
+            console.log(`  First HGR byte: 0x${rawBytes[rowOffset].toString(16)}`);
+        }
+
         // HGR scanline has 40 bytes = 20 byte pairs
         // Each byte pair produces 28 DHGR pixels via hgrToDhgr lookup
         // This matches AppleImageRenderer.renderHGRScanline (lines 82-88)
@@ -308,17 +317,8 @@ export default class NTSCRenderer {
                 const phase = i % 4;
                 const pattern = bits & 0x7f;
 
-                // Debug: Log first few pixels of row 50 to see patterns
-                if (row === 50 && x < 10) {
-                    console.log(`[NTSC Debug] row=50 x=${x} phase=${phase} pattern=${pattern} bits=0x${bits.toString(16)}`);
-                }
-
                 // Look up color from palette
                 const col = palette[phase][pattern];
-
-                if (row === 50 && x < 10) {
-                    console.log(`  col=0x${col.toString(16)} RGB=(${(col>>16)&0xff},${(col>>8)&0xff},${col&0xff})`);
-                }
 
                 // Extract RGB (format: AARRGGBB)
                 const r = (col >> 16) & 0xff;

@@ -268,6 +268,15 @@ export default class NTSCRenderer {
         const width = imageData.width;  // Should be 560 for DHGR NTSC
         const palette = NTSCRenderer.solidPalette;
 
+        // Debug first call
+        if (row === 0 && !this._debugLogged) {
+            this._debugLogged = true;
+            console.log(`[NTSC] First renderHgrScanline call:`);
+            console.log(`  imageData: ${imageData.width}x${imageData.height}`);
+            console.log(`  palette defined: ${palette !== undefined && palette[0] !== undefined}`);
+            console.log(`  First HGR byte: 0x${rawBytes[rowOffset].toString(16)}`);
+        }
+
         // HGR scanline has 40 bytes = 20 byte pairs
         // Each byte pair produces 28 DHGR pixels via hgrToDhgr lookup
         // This matches AppleImageRenderer.renderHGRScanline (lines 82-88)

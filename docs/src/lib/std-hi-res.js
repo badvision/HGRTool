@@ -212,8 +212,11 @@ export default class StdHiRes {
         console.log("🟢 StdHiRes.renderFull() called, renderMode:", renderMode);
         // Check rendering mode
         if (renderMode === 'ntsc') {
-            console.log("🟡 Using NTSC renderer");
+            console.log("🟡 Using NTSC renderer for full image");
             this.renderFullNTSC(imageData);
+            // Debug: Sample a pixel to verify rendering
+            const samplePixel = imageData.data[((50 * imageData.width) + 100) * 4];
+            console.log(`  Sample pixel at (100,50): R=${samplePixel}`);
         } else if (renderMode === 'mono') {
             console.log("🟣 Using Mono renderer");
             this.renderArea(imageData, 'mono', 0, 0, StdHiRes.NUM_COLS, StdHiRes.NUM_ROWS);
