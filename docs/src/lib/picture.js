@@ -92,7 +92,11 @@ export default class Picture {
         this.mScaledCenterX = this.pixelImage.width / 2;
         this.mScaledCenterY = this.pixelImage.height / 2;
 
+        // Track current render mode for this picture
+        this.currentRenderMode = 'rgb';
+
         // Generate initial rendering.
+        // Note: render mode is managed globally by Settings, not by individual Pictures
         this.render();
     }
 
@@ -248,25 +252,47 @@ export default class Picture {
     // This is a lossy transformation, e.g. the RGBA output does not note the difference between
     // black0 and black1.
     //
-    render() {
-        this.rawImage.renderFull(this.pixelImage, this.useMono);
+    //  mode: optional render mode ('rgb', 'ntsc', 'mono'). If not provided, uses default 'rgb'.
+    //
+    render(mode = 'rgb') {
+        console.log("🔵 Picture.render() called, mode:", mode);
+
+        // Convert useMono boolean to renderMode string, or use provided mode
+        const effectiveMode = this.useMono ? 'mono' : mode;
+
+        // Store the current render mode for this picture
+        this.currentRenderMode = effectiveMode;
+
+        // Check if we need to resize pixelImage for NTSC mode
+        const requiredWidth = effectiveMode === 'ntsc' ? StdHiRes.NUM_COLS * 2 : StdHiRes.NUM_COLS;
+        console.log("🔵 Required width:", requiredWidth, "Current width:", this.pixelImage.width);
+
+        if (this.pixelImage.width !== requiredWidth) {
+            console.log("🔵 Recreating ImageData with new width:", requiredWidth);
+            this.pixelImage = new ImageData(requiredWidth, StdHiRes.NUM_ROWS);
+            this.tempCanvas.width = requiredWidth;
+        }
+
+        this.rawImage.renderFull(this.pixelImage, effectiveMode);
     }
 
     //
     // Renders an area of the ImageData object.  The actual area updated in our ImageData may be
     // larger than what is requested.
     //
-    //  left: leftmost X coordinate
-    //  top: topmost Y coordinate
-    //  width: width of region
-    //  height: height of region
+    //  rect: Rect object defining the area to render
+    //  mode: optional render mode ('rgb', 'ntsc', 'mono'). If not provided, uses currentRenderMode.
     //
-    renderArea(rect) {
+    renderArea(rect, mode) {
         if (rect.isEmpty) {
             console.log("renderArea(): rect is empty");
             return;
         }
-        this.rawImage.renderArea(this.pixelImage, this.useMono,
+        // If no mode specified, use the current render mode for this picture (default to 'rgb' if unset)
+        const modeToUse = mode !== undefined ? mode : (this.currentRenderMode || 'rgb');
+        // Convert useMono boolean to renderMode string, or use provided mode
+        const effectiveMode = this.useMono ? 'mono' : modeToUse;
+        this.rawImage.renderArea(this.pixelImage, effectiveMode,
             rect.left, rect.top, rect.width, rect.height);
     }
 
@@ -304,9 +330,14 @@ export default class Picture {
         let canvasOffY = Math.trunc((picCanvas.height / 2) - this.scaledCenterY);
 
         // Draw primary image, scaling up.
+        // For NTSC mode: ImageData is 560px wide (for sub-pixel precision), but we display
+        // at 280px logical width (same as RGB/Mono). Browser scales 560→280 automatically.
+        const displayWidth = (this.currentRenderMode === 'ntsc')
+            ? (StdHiRes.NUM_COLS * this.scale)  // 280px logical width
+            : (this.width * this.scale);         // Use actual width for RGB/mono
         // console.log(`draw ${this.width}x${this.height} at ${canvasOffX},${canvasOffY}`);
         picCtx.drawImage(this.tempCanvas, canvasOffX, canvasOffY,
-                this.width * this.scale, this.height * this.scale);
+                displayWidth, this.height * this.scale);
 
         if (this.nope) {
             // Draw an overlay that dims alternate 7-pixel sections.
@@ -324,10 +355,14 @@ export default class Picture {
         this.drawThumbnail(thumbnailCtx);
 
         // Draw it again in the panner canvas.
+        // For NTSC mode, use logical width (280px) for panner too
+        const pannerLogicalWidth = (this.currentRenderMode === 'ntsc')
+            ? StdHiRes.NUM_COLS
+            : this.pixelImage.width;
         let pannerCanvas = pannerCtx.canvas;
-        pannerCanvas.width = this.pixelImage.width;
+        pannerCanvas.width = pannerLogicalWidth;
         pannerCanvas.height = this.pixelImage.height;
-        pannerCtx.drawImage(this.tempCanvas, 0, 0);
+        pannerCtx.drawImage(this.tempCanvas, 0, 0, pannerLogicalWidth, this.pixelImage.height);
 
         // Compute the visibility rect, using unscaled image coordinates.  We know the
         // center position within the image.

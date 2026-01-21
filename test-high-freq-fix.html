@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>NTSC High-Frequency Pattern Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        canvas { border: 1px solid black; margin: 10px; image-rendering: pixelated; }
+        .test { margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>NTSC High-Frequency Pattern Test</h1>
+    <p>Testing if high-frequency patterns (0x55/0x2a checkerboard) render as grayscale</p>
+
+    <div class="test">
+        <h2>Pattern 1: 0x55/0x2a (Checkerboard)</h2>
+        <canvas id="canvas1" width="560" height="192"></canvas>
+        <div id="result1"></div>
+    </div>
+
+    <div class="test">
+        <h2>Pattern 2: 0x2a/0x55 (Inverse Checkerboard)</h2>
+        <canvas id="canvas2" width="560" height="192"></canvas>
+        <div id="result2"></div>
+    </div>
+
+    <div class="test">
+        <h2>Pattern 3: 0xd5/0xaa (Checkerboard with high bit)</h2>
+        <canvas id="canvas3" width="560" height="192"></canvas>
+        <div id="result3"></div>
+    </div>
+
+    <script type="module">
+        import NTSCRenderer from './docs/lib/ntsc-renderer.js';
+
+        // Create HGR screen with specific pattern
+        function createHgrScreen(evenByte, oddByte) {
+            const screen = new Uint8Array(40 * 192);
+            for (let row = 0; row < 192; row++) {
+                for (let col = 0; col < 40; col++) {
+                    // Alternate between even and odd bytes
+                    screen[row * 40 + col] = (col % 2 === 0) ? evenByte : oddByte;
+                }
+            }
+            return screen;
+        }
+
+        // Render and analyze pattern
+        function testPattern(canvasId, resultId, evenByte, oddByte, name) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.createImageData(560, 192);
+
+            const screen = createHgrScreen(evenByte, oddByte);
+            const renderer = new NTSCRenderer();
+
+            // Render middle 20 rows
+            for (let row = 86; row < 106; row++) {
+                renderer.renderHgrScanline(imageData, screen, row, row * 40);
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+
+            // Sample pixels from center and analyze color
+            const centerData = ctx.getImageData(280, 96, 20, 20);
+            const pixels = centerData.data;
+
+            let sumR = 0, sumG = 0, sumB = 0;
+            let count = 0;
+
+            for (let i = 0; i < pixels.length; i += 4) {
+                sumR += pixels[i];
+                sumG += pixels[i + 1];
+                sumB += pixels[i + 2];
+                count++;
+            }
+
+            const avgR = sumR / count;
+            const avgG = sumG / count;
+            const avgB = sumB / count;
+
+            // Calculate color variance
+            const variance = Math.abs(avgR - avgG) + Math.abs(avgG - avgB) + Math.abs(avgB - avgR);
+
+            const resultDiv = document.getElementById(resultId);
+            resultDiv.innerHTML = `
+                <p>Average RGB: (${avgR.toFixed(1)}, ${avgG.toFixed(1)}, ${avgB.toFixed(1)})</p>
+                <p>Color variance: ${variance.toFixed(1)}</p>
+                <p><strong>${variance < 30 ? '✓ PASS: Grayscale (no color artifacts)' : '✗ FAIL: Color artifacts detected!'}</strong></p>
+            `;
+        }
+
+        // Run tests
+        window.addEventListener('load', () => {
+            console.log('[Test] Starting high-frequency pattern tests...');
+            testPattern('canvas1', 'result1', 0x55, 0x2a, 'Pattern 1');
+            testPattern('canvas2', 'result2', 0x2a, 0x55, 'Pattern 2');
+            testPattern('canvas3', 'result3', 0xd5, 0xaa, 'Pattern 3');
+        });
+    </script>
+</body>
+</html>

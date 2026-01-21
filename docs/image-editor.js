@@ -70,11 +70,16 @@ class ImageEditor {
     thumbnailContexts = [];
     thumbnailButtons = [];
 
-    // Color/mono checkbox.  We need to maintain our UI element, but the value is
-    // picture-specific.
-    useMonoElem = document.getElementById("useMono");
+    // Rendering mode radio buttons (initialized in constructor)
+    renderRGBElem = undefined;
+    renderNTSCElem = undefined;
+    renderMonoElem = undefined;
 
     constructor() {
+        // Initialize rendering mode radio button references
+        this.renderRGBElem = document.getElementById("render-mode-rgb");
+        this.renderNTSCElem = document.getElementById("render-mode-ntsc");
+        this.renderMonoElem = document.getElementById("render-mode-mono");
         //
         // Top bar commands.
         //
@@ -138,7 +143,9 @@ class ImageEditor {
         //
         // Bottom bar controls.
         //
-        this.useMonoElem.addEventListener("change", this.handleUseMono.bind(this));
+        this.renderRGBElem.addEventListener("change", this.handleRenderModeChange.bind(this));
+        this.renderNTSCElem.addEventListener("change", this.handleRenderModeChange.bind(this));
+        this.renderMonoElem.addEventListener("change", this.handleRenderModeChange.bind(this));
         this.scaleSliderElem.addEventListener("input", this.handleScaleSlider.bind(this));
         document.getElementById("curcolor-button").addEventListener("click",
             this.handleSelectColor.bind(this));
@@ -241,6 +248,20 @@ class ImageEditor {
         this.setOutlineRect(Rect.EMPTY_RECT, false);
 
         console.log("ImageEditor initialized");
+
+        // TEMP DISABLE FOR TESTING
+        // Auto-create blank document if none loaded
+        // if (this.pictureList.length === 0) {
+        //     // Check for edge cases that should skip auto-create
+        //     const hasUrlParams = window.location.search.length > 0;
+
+        //     if (!hasUrlParams) {
+        //         // Use setTimeout to ensure DOM is fully initialized
+        //         setTimeout(() => {
+        //             this.handleNew();
+        //         }, 0);
+        //     }
+        // }
     }
 
     //
@@ -311,14 +332,22 @@ class ImageEditor {
     });
 
     //
-    // Handles change to the "use mono" checkbox.
+    // Handles change to rendering mode radio buttons.
     //
-    handleUseMono(event) {
+    handleRenderModeChange(event) {
+        console.log("🔴 handleRenderModeChange called");
         if (this.currentPicture != undefined) {
-            this.currentPicture.useMono = event.currentTarget.checked;
-            this.currentPicture.render();
+            const mode = event.currentTarget.value;
+            console.log("🔴 Render mode changed to:", mode);
+            console.log("🔴 Before save:", gSettings.renderMode);
+            gSettings.renderMode = mode;
+            console.log("🔴 After save:", gSettings.renderMode);
+            console.log("🔴 localStorage:", localStorage.renderMode);
+            this.currentPicture.render(mode);
             this.drawCurrentPicture();
-            this.onColorChanged();          // redraw color swatch
+            this.onColorChanged();
+        } else {
+            console.log("🔴 No current picture to render");
         }
     }
 
@@ -910,7 +939,7 @@ class ImageEditor {
             if (this.currentPicture.isUndoContextOpen()) {
                 console.log("canceling pending undo action on pic switch");
                 this.currentPicture.closeUndoContext(false);
-                this.currentPicture.renderArea(this.dirtyRect);
+                this.currentPicture.renderArea(this.dirtyRect, gSettings.renderMode);
                 // Redraw so the thumbnail is correct.
                 this.drawCurrentPicture();
             }
@@ -918,7 +947,18 @@ class ImageEditor {
         this.currentPicture = pic;
         this.colorPicker = gColorPickerHgr;     // this may need to change based on pic type
         this.pictureScale = this.currentPicture.scale;
-        this.useMonoElem.checked = this.currentPicture.useMono;
+
+        // Update radio buttons based on current render mode
+        const mode = gSettings.renderMode;
+        this.renderRGBElem.checked = (mode === 'rgb');
+        this.renderNTSCElem.checked = (mode === 'ntsc');
+        this.renderMonoElem.checked = (mode === 'mono');
+
+        // Apply saved render mode to current picture
+        if (this.currentPicture) {
+            this.currentPicture.render(mode);
+        }
+
         pic.outlineRect = this.outlineRect;     // transfer the outline rect
 
         // If we have a visible clipping, get that set up.
@@ -1059,7 +1099,7 @@ class ImageEditor {
             // re-rendering the area it occupied, and redrawing the scren.
             if (this.currentPicture.isUndoContextOpen()) {
                 this.currentPicture.closeUndoContext(false);
-                this.currentPicture.renderArea(this.dirtyRect);
+                this.currentPicture.renderArea(this.dirtyRect, gSettings.renderMode);
                 this.drawCurrentPicture();
             }
         }
@@ -1073,7 +1113,7 @@ class ImageEditor {
             return;     // no clipping to redraw
         }
         this.currentPicture.revert();
-        this.currentPicture.renderArea(this.dirtyRect);
+        this.currentPicture.renderArea(this.dirtyRect, gSettings.renderMode);
         this.dirtyRect = this.currentPicture.putClipping(this.visClipping,
             this.outlineRect.left, this.outlineRect.top, gSettings.clipXferMode);
         this.drawCurrentPicture();
@@ -1217,7 +1257,7 @@ class ImageEditor {
                 this.currentPicture.openUndoContext("scribble");
                 this.dirtyRect =
                     this.currentPicture.setPixel(picX, picY, this.colorPicker.currentPat);
-                this.currentPicture.renderArea(this.dirtyRect);
+                this.currentPicture.renderArea(this.dirtyRect, gSettings.renderMode);
                 this.drawCurrentPicture();
                 break;
             case "pointermove":
@@ -1264,7 +1304,7 @@ class ImageEditor {
                 }
                 // Erase previous line, draw new.
                 this.currentPicture.revert();
-                this.currentPicture.renderArea(this.dirtyRect);
+                this.currentPicture.renderArea(this.dirtyRect, gSettings.renderMode);
                 this.dirtyRect = this.currentPicture.drawLine(this.startPicX, this.startPicY,
                     picX, picY, this.colorPicker.currentPat, gStylePicker.strokeStyle);
                 this.drawCurrentPicture();
@@ -1312,7 +1352,7 @@ class ImageEditor {
                     break;
                 }
                 this.currentPicture.revert();
-                this.currentPicture.renderArea(this.dirtyRect);
+                this.currentPicture.renderArea(this.dirtyRect, gSettings.renderMode);
                 if (doFill) {
                     this.dirtyRect = this.currentPicture.drawFillRect(
                         this.startPicX, this.startPicY, picX, picY,
@@ -1370,7 +1410,7 @@ class ImageEditor {
                     break;
                 }
                 this.currentPicture.revert();
-                this.currentPicture.renderArea(this.dirtyRect);
+                this.currentPicture.renderArea(this.dirtyRect, gSettings.renderMode);
                 if (doFill) {
                     this.dirtyRect = this.currentPicture.drawFillEllipse(
                         this.startPicX, this.startPicY, picX, picY,

@@ -89,9 +89,14 @@
                 <label for="pictureScaleSlider">scale=</label><output id="pictureScale">1</output>x
             </form>
         </div>
-        <div id="bottom-mono">
-            <input type="checkbox" id="useMono"/>
-            <label for="useMono">Monochrome</label>
+        <div id="bottom-render-mode">
+            Rendering:
+            <input type="radio" id="render-mode-rgb" name="renderMode" value="rgb" checked/>
+            <label for="render-mode-rgb">RGB</label>
+            <input type="radio" id="render-mode-ntsc" name="renderMode" value="ntsc"/>
+            <label for="render-mode-ntsc">NTSC</label>
+            <input type="radio" id="render-mode-mono" name="renderMode" value="mono"/>
+            <label for="render-mode-mono">Mono</label>
         </div>
         <div id="bottom-color">
             Pattern

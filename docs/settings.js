@@ -32,6 +32,8 @@ export default class Settings {
     set colorSwatchClose(value) { localStorage.colorSwatchClose = value; }
     get clipXferMode() { return localStorage.clipXferMode; }
     set clipXferMode(value) { localStorage.clipXferMode = value; }
+    get renderMode() { return localStorage.renderMode; }
+    set renderMode(value) { localStorage.renderMode = value; }
 
     constructor(mainObj) {
         if (Settings.isInitialized != false) {
@@ -90,6 +92,11 @@ export default class Settings {
             case Clipping.XFER_XOR:
                 this.xferXORElem.checked = true;
                 break;
+        }
+
+        // Initialize render mode
+        if (!this.renderMode || (this.renderMode !== 'rgb' && this.renderMode !== 'ntsc' && this.renderMode !== 'mono')) {
+            this.renderMode = 'rgb';
         }
 
         Settings.isInitialized = true;
