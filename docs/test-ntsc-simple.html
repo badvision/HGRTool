@@ -15,9 +15,8 @@
         const ctx = canvas.getContext('2d');
         const output = document.getElementById('output');
 
-        // Create HGR image
+        // Create HGR image (already initialized with zeros)
         const hgr = new StdHiRes();
-        hgr.clear();
 
         // Draw a solid purple rectangle (pattern 1: 0x2a/0x55)
         // Pattern 1 from getSolidPatterns() alternates 0x2a and 0x55
