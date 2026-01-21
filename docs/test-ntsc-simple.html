@@ -40,7 +40,9 @@
         ctx.putImageData(imageData, 0, 0);
 
         // Sample pixels from the purple rectangle
-        const sampleData = ctx.getImageData(10 * 2, 55, 10, 1);  // Sample from middle of rect (x=10*2 for DHGR)
+        // We drew bytes 5-15, each byte is 7 HGR pixels = 14 DHGR pixels
+        // So byte 10 (middle) starts at DHGR pixel 10 * 7 * 2 = 140
+        const sampleData = ctx.getImageData(140, 55, 10, 1);  // Sample from middle of rect
         const sample = sampleData.data;
         const avgR = (sample[0] + sample[4] + sample[8]) / 3;
         const avgG = (sample[1] + sample[5] + sample[9]) / 3;
