@@ -167,7 +167,18 @@ export async function getCanvasPixels(page, x, y, width, height) {
   return await page.evaluate(({ x, y, width, height }) => {
     const canvas = document.getElementById('edit-surface');
     const ctx = canvas.getContext('2d');
+
+    // Get canvas bounding box to understand coordinate system
+    const rect = canvas.getBoundingClientRect();
+    console.log(`[getCanvasPixels] Canvas bounds: x=${rect.x}, y=${rect.y}, width=${rect.width}, height=${rect.height}`);
+    console.log(`[getCanvasPixels] Sampling at canvas coords: (${x}, ${y}), size: ${width}x${height}`);
+
     const imageData = ctx.getImageData(x, y, width, height);
+
+    // Debug: Show what we got
+    const firstPixel = imageData.data;
+    console.log(`[getCanvasPixels] First pixel RGB: (${firstPixel[0]}, ${firstPixel[1]}, ${firstPixel[2]})`);
+
     return {
       data: Array.from(imageData.data),
       width: imageData.width,
