@@ -319,6 +319,13 @@ export default class Picture {
         // allows us to freely scale and position the image within the Canvas.
         this.tempCtx.putImageData(this.pixelImage, 0, 0);
 
+        // Debug: Check if NTSC pixels are actually colored
+        if (this.currentRenderMode === 'ntsc' && !this._ntscDebugLogged) {
+            this._ntscDebugLogged = true;
+            const testPixel = this.tempCtx.getImageData(100, 50, 1, 1).data;
+            console.log(`[Picture] NTSC pixel at (100,50) on tempCanvas: R=${testPixel[0]} G=${testPixel[1]} B=${testPixel[2]}`);
+        }
+
         picCtx.imageSmoothingEnabled = false;      // prevent blurry upscaling
 
         // Compute top/left edge that will result in the drawn image being centered.  If the
@@ -338,6 +345,14 @@ export default class Picture {
         // console.log(`draw ${this.width}x${this.height} at ${canvasOffX},${canvasOffY}`);
         picCtx.drawImage(this.tempCanvas, canvasOffX, canvasOffY,
                 displayWidth, this.height * this.scale);
+
+        // Debug: Check what actually ended up on the display canvas
+        if (this.currentRenderMode === 'ntsc' && !this._displayDebugLogged) {
+            this._displayDebugLogged = true;
+            const displayPixel = picCtx.getImageData(canvasOffX + 50, canvasOffY + 50, 1, 1).data;
+            console.log(`[Picture] Display canvas pixel at (${canvasOffX + 50},${canvasOffY + 50}): R=${displayPixel[0]} G=${displayPixel[1]} B=${displayPixel[2]}`);
+            console.log(`[Picture] displayWidth=${displayWidth}, tempCanvas.width=${this.tempCanvas.width}, scale=${this.scale}`);
+        }
 
         if (this.nope) {
             // Draw an overlay that dims alternate 7-pixel sections.
