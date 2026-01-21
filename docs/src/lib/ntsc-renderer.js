@@ -76,7 +76,11 @@ export default class NTSCRenderer {
     constructor() {
         // Initialize lookup tables if not already done
         if (NTSCRenderer.hgrToDhgr.length === 0) {
+            console.log('[NTSC] Initializing palettes...');
             NTSCRenderer.initPalettes();
+            console.log('[NTSC] Palette initialized. Sample: solidPalette[0][76] = 0x' +
+                       (NTSCRenderer.solidPalette[0][76] !== undefined ?
+                        NTSCRenderer.solidPalette[0][76].toString(16) : 'undefined'));
         }
     }
 
