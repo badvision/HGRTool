@@ -308,17 +308,8 @@ export default class NTSCRenderer {
                 const phase = i % 4;
                 const pattern = bits & 0x7f;
 
-                // Debug: Log first few pixels of row 50 to see patterns
-                if (row === 50 && x < 10) {
-                    console.log(`[NTSC Debug] row=50 x=${x} phase=${phase} pattern=${pattern} bits=0x${bits.toString(16)}`);
-                }
-
                 // Look up color from palette
                 const col = palette[phase][pattern];
-
-                if (row === 50 && x < 10) {
-                    console.log(`  col=0x${col.toString(16)} RGB=(${(col>>16)&0xff},${(col>>8)&0xff},${col&0xff})`);
-                }
 
                 // Extract RGB (format: AARRGGBB)
                 const r = (col >> 16) & 0xff;
