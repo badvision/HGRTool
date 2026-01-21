@@ -176,37 +176,16 @@ export async function getCanvasPixels(page, x, y, width, height) {
     // For a newly created image, scaledCenterX = imageWidth/2, scaledCenterY = imageHeight/2
     // So: canvasOffX = (canvas.width - imageWidth) / 2
 
-    // ALTERNATE APPROACH: Find the image bounds by scanning for non-black pixels
-    // The canvas has the image centered with black/gray borders
-    // We need to find where the actual image starts
-
-    // Sample the top row to find left edge
-    let leftEdge = 0;
-    const topRowData = ctx.getImageData(0, canvas.height / 2, canvas.width, 1).data;
-    for (let i = 0; i < canvas.width; i++) {
-      const pixelIdx = i * 4;
-      // Look for first non-gray pixel (gray is likely ~64,64,64 from the UI)
-      if (topRowData[pixelIdx] !== topRowData[pixelIdx + 1] ||
-          topRowData[pixelIdx] !== topRowData[pixelIdx + 2] ||
-          topRowData[pixelIdx] < 50 || topRowData[pixelIdx] > 80) {
-        leftEdge = i;
-        break;
-      }
+    // Get the offset from the Picture instance (exposed as window.imageEditor.currentPicture)
+    const picture = window.imageEditor?.currentPicture;
+    if (!picture) {
+      console.error('[getCanvasPixels] imageEditor.currentPicture not found!');
+      return { data: [], width: 0, height: 0 };
     }
 
-    // Sample the left column to find top edge
-    let topEdge = 0;
-    for (let i = 0; i < canvas.height; i++) {
-      const pixel = ctx.getImageData(canvas.width / 2, i, 1, 1).data;
-      if (pixel[0] !== pixel[1] || pixel[0] !== pixel[2] ||
-          pixel[0] < 50 || pixel[0] > 80) {
-        topEdge = i;
-        break;
-      }
-    }
-
-    const canvasOffX = leftEdge;
-    const canvasOffY = topEdge;
+    // Calculate the canvas offset the same way Picture.drawPicture() does
+    const canvasOffX = Math.trunc((canvas.width / 2) - picture.scaledCenterX);
+    const canvasOffY = Math.trunc((canvas.height / 2) - picture.scaledCenterY);
 
     console.log(`[getCanvasPixels] Canvas offset: (${canvasOffX}, ${canvasOffY})`);
     console.log(`[getCanvasPixels] Adjusted coords: (${x + canvasOffX}, ${y + canvasOffY})`);

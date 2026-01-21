@@ -46,6 +46,9 @@ class ImageEditor {
     picCanvas = document.getElementById("edit-surface");
     picCtx = this.picCanvas.getContext("2d");
 
+    // Expose for testing
+    window.imageEditor = this;
+
     // Panner canvas.
     pannerCanvas = document.getElementById("panner");
     pannerCtx = this.pannerCanvas.getContext("2d");
