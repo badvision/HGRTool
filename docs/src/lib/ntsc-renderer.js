@@ -36,24 +36,36 @@ export default class NTSCRenderer {
     static MAX_Y = 1.0;
     static MIN_Y = 0.0;
 
-    // YIQ values for HGR colors (6 colors + black/white)
-    // Based on Apple II NTSC composite video output
-    // [Y, I, Q] for each color index [0-7]
-    // Indices: 0=black0, 1=purple, 2=green, 3=white0, 4=black1, 5=blue, 6=orange, 7=white1
+    // YIQ values for 16 DHGR colors (matching OutlawEditor lines 68-84)
+    // These values represent the NTSC composite video color space
+    // [Y, I, Q] for each 4-bit color pattern
     static YIQ_VALUES = [
-        [0.0, 0.0, 0.0],      // 0: Black (hi-bit 0)
-        [0.5, 0.25, 0.5],     // 1: Purple (hi-bit 0, phase 0)
-        [0.5, -0.25, -0.5],   // 2: Green (hi-bit 0, phase 180)
-        [1.0, 0.0, 0.0],      // 3: White (hi-bit 0)
-        [0.0, 0.0, 0.0],      // 4: Black (hi-bit 1)
-        [0.5, -0.5, 0.25],    // 5: Blue (hi-bit 1, phase 270)
-        [0.5, 0.5, -0.25],    // 6: Orange (hi-bit 1, phase 90)
-        [1.0, 0.0, 0.0]       // 7: White (hi-bit 1)
+        [0.0, 0.0, 0.0],        // 0
+        [0.25, 0.5, 0.5],       // 1
+        [0.25, -0.5, 0.5],      // 2
+        [0.5, 0.0, 1.0],        // 3
+        [0.25, -0.5, -0.5],     // 4
+        [0.5, 0.0, 0.0],        // 5
+        [0.5, -1.0, 0.0],       // 6
+        [0.75, -0.5, 0.5],      // 7
+        [0.25, 0.5, -0.5],      // 8
+        [0.5, 1.0, 0.0],        // 9
+        [0.5, 0.0, 0.0],        // 10
+        [0.75, 0.5, 0.5],       // 11
+        [0.5, 0.0, -1.0],       // 12
+        [0.75, 0.5, -0.5],      // 13
+        [0.75, -0.5, -0.5],     // 14
+        [1.0, 0.0, 0.0]         // 15
     ];
 
     // HGR to DHGR bit expansion lookup tables
     static hgrToDhgr = [];
     static hgrToDhgrBW = [];
+
+    // Palette lookup tables [phase][pattern] for fast color lookups
+    // Matching OutlawEditor lines 63-64
+    static solidPalette = Array(4).fill(null).map(() => new Array(128));
+    static textPalette = Array(4).fill(null).map(() => new Array(128));
 
     // Adjustable NTSC parameters
     hue = 0.0;          // [-180, 180] degrees
@@ -79,25 +91,57 @@ export default class NTSCRenderer {
     }
 
     /**
-     * Initializes the HGR to DHGR bit expansion lookup tables.
+     * Initializes the palette lookup tables and HGR to DHGR bit expansion tables.
+     * Matching OutlawEditor's initPalettes() (lines 67-124).
      *
-     * CRITICAL FIX: Remove the left-shift that was causing the 2-bit offset bug.
+     * This creates:
+     * 1. solidPalette[4][128] - Color palettes for each phase and 7-bit pattern
+     * 2. textPalette[4][128] - Same but with luminance based on bit density
+     * 3. hgrToDhgr[512][256] - HGR byte pair to 28-bit DHGR word conversion
+     * 4. hgrToDhgrBW[256][256] - Same but for black/white rendering
      *
-     * Apple II HGR format:
-     * - Each byte has 7 data bits + 1 high bit
-     * - High bit selects color palette (0=purple/green, 1=blue/orange)
-     * - In DHGR, each HGR bit becomes 2 DHGR bits: 0->00, 1->11
-     * - High bit should NOT shift the bit pattern, only affect color interpretation
-     *
-     * The BUG: Original code did `b1 <<= 1` when high bit set, causing a
-     * 2-bit shift in the alternating pattern (since each bit is doubled).
-     * This created 8 different phase/pattern combinations instead of solid fills.
-     *
-     * The FIX: Don't shift the doubled bits. Let the color interpretation
-     * logic (getColorFromPattern) handle the high bit's effect on color phase.
+     * CRITICAL: The high-bit shift (lines 106-111) is the key to proper color rendering.
+     * When high bit is set, the doubled bits are shifted left by 1, creating a half-pixel
+     * phase shift that produces the correct color artifacts.
      */
     static initPalettes() {
-        // Initialize HGR to DHGR bit expansion tables
+        const yiq = NTSCRenderer.YIQ_VALUES;
+
+        // Build solidPalette and textPalette (matching OutlawEditor lines 87-98)
+        const maxLevel = 10;
+        for (let offset = 0; offset < 4; offset++) {
+            for (let pattern = 0; pattern < 128; pattern++) {
+                // Calculate luminance level from bit pattern (lines 89)
+                const level = (pattern & 1) +
+                             ((pattern >> 1) & 1) * 1 +
+                             ((pattern >> 2) & 1) * 2 +
+                             ((pattern >> 3) & 1) * 4 +
+                             ((pattern >> 4) & 1) * 2 +
+                             ((pattern >> 5) & 1) * 1;
+
+                // Extract 4-bit color from center of 7-bit pattern (line 90)
+                let col = (pattern >> 2) & 15;
+
+                // Rotate color bits based on phase offset (lines 91-93)
+                for (let rot = 0; rot < offset; rot++) {
+                    col = ((col & 8) >> 3) | ((col << 1) & 15);
+                }
+
+                // solidPalette uses YIQ table's luminance (line 96)
+                const y1 = yiq[col][0];
+                const i = yiq[col][1] * NTSCRenderer.MAX_I;
+                const q = yiq[col][2] * NTSCRenderer.MAX_Q;
+                NTSCRenderer.solidPalette[offset][pattern] =
+                    (255 << 24) | NTSCRenderer.yiqToRgb(y1, i, q);
+
+                // textPalette uses calculated luminance from bit density (line 97)
+                const y2 = level / maxLevel;
+                NTSCRenderer.textPalette[offset][pattern] =
+                    (255 << 24) | NTSCRenderer.yiqToRgb(y2, i, q);
+            }
+        }
+
+        // Build HGR to DHGR conversion tables (matching OutlawEditor lines 100-123)
         NTSCRenderer.hgrToDhgr = new Array(512);
         NTSCRenderer.hgrToDhgrBW = new Array(256);
 
@@ -110,36 +154,37 @@ export default class NTSCRenderer {
 
         for (let bb1 = 0; bb1 < 512; bb1++) {
             for (let bb2 = 0; bb2 < 256; bb2++) {
-                // Extract the 7-bit data and high bit from each byte
-                const prevData = bb1 & 0x7F;
-                const prevHighBit = (bb1 & 0x80) !== 0;
-                const curData = bb2 & 0x7F;
-                const curHighBit = (bb2 & 0x80) !== 0;
+                // Line 104: Check if bit 0 of current byte should be merged with prev byte
+                let value = ((bb1 & 385) >= 257) ? 1 : 0;
 
-                // Double each bit: 0b1010101 -> 0b11001100110011 (14 bits)
-                const b1 = NTSCRenderer.byteDoubler(prevData);
-                const b2 = NTSCRenderer.byteDoubler(curData);
-
-                // Build 28-bit value: [flags][prev bits][cur bits]
-                // Bits 0-13: previous byte doubled bits (NO SHIFT - this is the fix!)
-                // Bits 14-27: current byte doubled bits (NO SHIFT - this is the fix!)
-                // Bit 28: current byte bit 6 (for next byte continuation)
-                let value = b1 | (b2 << 14);
-
-                // Handle bit continuation from previous byte to current byte
-                // If prev byte's bit 6 is set AND cur byte's bit 0 is set, merge them
-                if ((prevData & 0x40) !== 0 && (curData & 0x01) !== 0) {
-                    value |= (1 << 14);  // Set bit 14 (start of current byte)
+                // Lines 105-108: Double bits with high-bit shift for previous byte
+                let b1 = NTSCRenderer.byteDoubler(bb1 & 127);
+                if ((bb1 & 128) !== 0) {
+                    b1 <<= 1;  // CRITICAL: Half-pixel shift when high bit set
                 }
 
-                // Set bit 28 if current byte has bit 6 set (for next byte's use)
-                if ((curData & 0x40) !== 0) {
-                    value |= 0x10000000;
+                // Lines 109-112: Double bits with high-bit shift for current byte
+                let b2 = NTSCRenderer.byteDoubler(bb2 & 127);
+                if ((bb2 & 128) !== 0) {
+                    b2 <<= 1;  // CRITICAL: Half-pixel shift when high bit set
+                }
+
+                // Lines 113-115: Merge bits if prev byte's bit 6 and cur byte's bit 0 are both set
+                if ((bb1 & 64) === 64 && (bb2 & 1) !== 0) {
+                    b2 |= 1;
+                }
+
+                // Line 116: Combine into 28-bit word
+                value |= b1 | (b2 << 14);
+
+                // Lines 117-119: Set bit 28 if current byte's bit 6 is set
+                if ((bb2 & 64) !== 0) {
+                    value |= 268435456;  // 0x10000000
                 }
 
                 NTSCRenderer.hgrToDhgr[bb1][bb2] = value;
 
-                // Black and white table (identical - no high bit handling needed)
+                // Line 121: Black and white table (no high bit handling)
                 if (bb1 < 256) {
                     NTSCRenderer.hgrToDhgrBW[bb1][bb2] =
                         NTSCRenderer.byteDoubler(bb1) | (NTSCRenderer.byteDoubler(bb2) << 14);
@@ -172,6 +217,25 @@ export default class NTSCRenderer {
     }
 
     /**
+     * Converts RGB to YIQ color space (inverse of yiqToRgb).
+     * @param {number} r - Red [0, 255]
+     * @param {number} g - Green [0, 255]
+     * @param {number} b - Blue [0, 255]
+     * @returns {Array<number>} [Y, I, Q]
+     */
+    rgbToYiq(r, g, b) {
+        const rNorm = r / 255.0;
+        const gNorm = g / 255.0;
+        const bNorm = b / 255.0;
+
+        const y = 0.299 * rNorm + 0.587 * gNorm + 0.114 * bNorm;
+        const i = 0.596 * rNorm - 0.275 * gNorm - 0.321 * bNorm;
+        const q = 0.212 * rNorm - 0.523 * gNorm + 0.311 * bNorm;
+
+        return [y, i, q];
+    }
+
+    /**
      * Converts YIQ to RGBA8888 format.
      */
     static yiqToRgba(y, i, q) {
@@ -183,18 +247,16 @@ export default class NTSCRenderer {
     // with YIQ color values, similar to RGB rendering logic.
 
     /**
-     * Renders an HGR scanline with NTSC color artifacts using DHGR conversion.
+     * Renders an HGR scanline with NTSC color artifacts using palette lookups.
      *
-     * REVISED ARCHITECTURE (fixes color bars bug):
-     * 1. Work directly with HGR bit patterns (280 bits)
-     * 2. Each HGR bit produces 2 DHGR output pixels
-     * 3. Use 2-bit HGR window (not 4-bit DHGR window) to determine color
-     * 4. Output 560 pixels (each HGR bit -> 2 identical DHGR pixels)
+     * This implementation matches OutlawEditor's palette-based approach:
+     * 1. Convert HGR byte pairs to 28-bit DHGR words using hgrToDhgr lookup
+     * 2. Extract 7-bit patterns from the DHGR word by shifting
+     * 3. Look up colors from solidPalette[phase][pattern]
+     * 4. Phase (0-3) alternates based on horizontal position
      *
-     * The KEY INSIGHT: NTSC color comes from alternating HGR bits (01 or 10),
-     * not from the DHGR representation. When HGR bits are doubled, a 4-bit
-     * DHGR window like "0011" doesn't look alternating, but it represents
-     * HGR bits "01" which IS alternating.
+     * The palette approach is much faster and more accurate than analyzing
+     * bit patterns, as all color combinations are pre-computed.
      *
      * @param {ImageData} imageData - Target image data (must be 560×192)
      * @param {Uint8Array} rawBytes - HGR screen data
@@ -204,55 +266,83 @@ export default class NTSCRenderer {
     renderHgrScanline(imageData, rawBytes, row, rowOffset) {
         const rgbaData = imageData.data;
         const width = imageData.width;  // Should be 560 for DHGR NTSC
+        const palette = NTSCRenderer.solidPalette;
 
-        // Step 1: Extract HGR bits (280 bits from 40 bytes)
-        const hgrBits = new Array(280);
-        const hgrHighBits = new Array(280);
-        let bitPos = 0;
+        // HGR scanline has 40 bytes = 20 byte pairs
+        // Each byte pair produces 28 DHGR pixels via hgrToDhgr lookup
+        // This matches AppleImageRenderer.renderHGRScanline (lines 82-88)
+        const scanline = new Array(20);
+        let extraHalfBit = false;
 
-        for (let byteIdx = 0; byteIdx < 40; byteIdx++) {
-            const curByte = rawBytes[rowOffset + byteIdx];
-            const highBit = (curByte & 0x80) !== 0;
-            const dataBits = curByte & 0x7F;
+        // Build scanline array of 28-bit words (matching OutlawEditor lines 82-88)
+        for (let x = 0; x < 40; x += 2) {
+            const b1 = rawBytes[rowOffset + x] & 0xff;
+            const b2 = rawBytes[rowOffset + x + 1] & 0xff;
 
-            // Extract 7 bits from this byte
-            for (let bit = 0; bit < 7 && bitPos < 280; bit++) {
-                hgrBits[bitPos] = (dataBits >> bit) & 1;
-                hgrHighBits[bitPos] = highBit;
-                bitPos++;
-            }
+            // Apply extra half-bit if previous word indicated it
+            const b1Index = (extraHalfBit && x > 0) ? (b1 | 0x100) : b1;
+            const wordValue = NTSCRenderer.hgrToDhgr[b1Index][b2];
+
+            // Extract bit 28 for next iteration
+            extraHalfBit = (wordValue & 0x10000000) !== 0;
+
+            // Store 28-bit word (mask off bit 28)
+            scanline[x / 2] = wordValue & 0x0fffffff;
         }
 
-        // Step 2: Render each DHGR pixel (560 pixels = 280 HGR bits × 2)
-        // NTSC blurs color over 4 HGR pixels (~4 color cycles), so we determine
-        // color for pairs of HGR pixels and output 4 DHGR pixels with that color
-        for (let hgrX = 0; hgrX < 280; hgrX += 2) {
-            // Get 4-bit HGR window (2 pairs for better color determination)
-            const bit0 = hgrX > 0 ? hgrBits[hgrX - 1] : 0;
-            const bit1 = hgrBits[hgrX];
-            const bit2 = hgrX + 1 < 280 ? hgrBits[hgrX + 1] : 0;
-            const bit3 = hgrX + 2 < 280 ? hgrBits[hgrX + 2] : 0;
-            // Use high bit from center of window (bit1 or bit2)
-            const highBit = hgrHighBits[hgrX + 1 < 280 ? hgrX + 1 : hgrX];
+        // Render scanline (matching AppleImageRenderer.renderScanline logic)
+        // Process each 28-bit word in the scanline
+        let x = 0;
+        for (let s = 0; s < scanline.length; s++) {
+            // Shift left by 2 and bring in bits from previous word (line 103-105)
+            let bits = scanline[s] << 2;
+            if (s > 0) {
+                bits |= (scanline[s - 1] >> 26) & 3;
+            }
 
-            // Determine color from 4-bit HGR pattern
-            const [y, i, q] = this.getColorFromHgr4BitWindow(bit0, bit1, bit2, bit3, highBit, hgrX);
+            // Get bits to add from next word for mid-word transition (line 114)
+            const add = (s < scanline.length - 1) ? (scanline[s + 1] & 7) : 0;
 
-            // Apply adjustable NTSC parameters
-            const [adjY, adjI, adjQ] = this.adjustYiq(y, i, q);
+            // Process all 28 DHGR pixels from this word (line 138-148)
+            for (let i = 0; i < 28; i++) {
+                const phase = i % 4;
+                const pattern = bits & 0x7f;
 
-            // Convert YIQ to RGB
-            const rgb = NTSCRenderer.yiqToRgb(adjY, adjI, adjQ);
+                // Look up color from palette
+                const col = palette[phase][pattern];
 
-            // Output 4 DHGR pixels for this 2-HGR-pixel pair
-            for (let pixelOffset = 0; pixelOffset < 4; pixelOffset++) {
-                const dhgrX = hgrX * 2 + pixelOffset;
-                if (dhgrX < width) {
-                    const pixelIndex = (row * width + dhgrX) * 4;
-                    rgbaData[pixelIndex] = (rgb >> 16) & 0xff;      // R
-                    rgbaData[pixelIndex + 1] = (rgb >> 8) & 0xff;   // G
-                    rgbaData[pixelIndex + 2] = rgb & 0xff;          // B
-                    rgbaData[pixelIndex + 3] = 0xff;                // A (fully opaque)
+                // Extract RGB (format: AARRGGBB)
+                const r = (col >> 16) & 0xff;
+                const g = (col >> 8) & 0xff;
+                const b = col & 0xff;
+
+                // Apply adjustable NTSC parameters if needed
+                let rgb;
+                if (this.hue !== 0 || this.saturation !== 1.0 ||
+                    this.brightness !== 1.0 || this.contrast !== 1.0) {
+                    const [y, i_val, q] = this.rgbToYiq(r, g, b);
+                    const [adjY, adjI, adjQ] = this.adjustYiq(y, i_val, q);
+                    rgb = NTSCRenderer.yiqToRgb(adjY, adjI, adjQ);
+                } else {
+                    rgb = (r << 16) | (g << 8) | b;
+                }
+
+                // Write pixel
+                if (x < width) {
+                    const pixelIndex = (row * width + x) * 4;
+                    rgbaData[pixelIndex] = (rgb >> 16) & 0xff;
+                    rgbaData[pixelIndex + 1] = (rgb >> 8) & 0xff;
+                    rgbaData[pixelIndex + 2] = rgb & 0xff;
+                    rgbaData[pixelIndex + 3] = 0xff;
+                }
+                x++;
+
+                // Shift to next bit (line 144)
+                bits >>= 1;
+
+                // At pixel 20, add bits from next word (line 145-147)
+                if (i === 20) {
+                    bits |= add << 9;  // hiresMode = true, so shift by 9
                 }
             }
         }
