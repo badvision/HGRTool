@@ -18,6 +18,7 @@ import StdHiRes from "./lib/std-hi-res.js";
 import Picture from "./lib/picture.js";
 import Rect from "./lib/rect.js";
 import Debug from "./lib/debug.js";
+import ImageDither from "./lib/image-dither.js";
 import ColorPickerHgr from "./color-picker-hgr.js";
 import StylePicker from "./style-picker.js";
 import FontPicker from "./font-picker.js";
@@ -45,9 +46,6 @@ class ImageEditor {
     // Picture canvas.
     picCanvas = document.getElementById("edit-surface");
     picCtx = this.picCanvas.getContext("2d");
-
-    // Expose for testing
-    window.imageEditor = this;
 
     // Panner canvas.
     pannerCanvas = document.getElementById("panner");
@@ -79,10 +77,19 @@ class ImageEditor {
     renderMonoElem = undefined;
 
     constructor() {
+        // Expose for testing
+        window.imageEditor = this;
+
         // Initialize rendering mode radio button references
         this.renderRGBElem = document.getElementById("render-mode-rgb");
         this.renderNTSCElem = document.getElementById("render-mode-ntsc");
         this.renderMonoElem = document.getElementById("render-mode-mono");
+
+        // Initialize scale-related DOM elements
+        this.scaleElem = document.getElementById("pictureScale");
+        this.scaleSliderElem = document.getElementById("pictureScaleSlider");
+        this.scaleMults = [ 1, 2, 3, 4, 6, 8, 16, 32 ];
+        this.mPictureScaleIndex = 0;
         //
         // Top bar commands.
         //
@@ -90,6 +97,8 @@ class ImageEditor {
             this.handleNew.bind(this));
         document.getElementById("btn-open").addEventListener("click",
             this.handleOpen.bind(this));
+        document.getElementById("btn-import").addEventListener("click",
+            this.handleImportImage.bind(this));
         document.getElementById("btn-save").addEventListener("click",
             this.handleSave.bind(this));
         document.getElementById("btn-save-as").addEventListener("click",
@@ -269,11 +278,8 @@ class ImageEditor {
 
     //
     // Image scaling.  We use a non-linear fixed set of multipliers.
+    // Initialized in constructor: scaleElem, scaleSliderElem, scaleMults, mPictureScaleIndex
     //
-    scaleElem = document.getElementById("pictureScale");
-    scaleSliderElem = document.getElementById("pictureScaleSlider");
-    scaleMults = [ 1, 2, 3, 4, 6, 8, 16, 32 ];
-    mPictureScaleIndex = 0;
     // Get/set the scale multiplier.  If the multiplier passed to the setter isn't in the
     // multiplier array, we pick the closest.
     get pictureScale() { return this.scaleMults[this.mPictureScaleIndex]; }
@@ -622,6 +628,130 @@ class ImageEditor {
         event.currentTarget.value = "";
 
         document.getElementById("old-open").close();
+    }
+
+    /**
+     * Imports a standard image (PNG/JPG/GIF) and converts it to HGR format.
+     */
+    async handleImportImage() {
+        if (this.pictureList.length == this.MAX_FILES) {
+            this.showMessage(`You have ${this.pictureList.length} images open.  Please` +
+                ` close one before importing another.`);
+            return;
+        }
+
+        const pickerOpts = {
+            types: [
+                {
+                    description: 'Images',
+                    accept: {
+                        'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.webp']
+                    }
+                }
+            ],
+            multiple: false
+        };
+
+        let fileHandle;
+        try {
+            if (!("showOpenFilePicker" in window)) {
+                // Fallback for older browsers
+                this.showMessage("Import feature requires a modern browser with File System Access API");
+                return;
+            }
+            [fileHandle] = await window.showOpenFilePicker(pickerOpts);
+        } catch (error) {
+            // User canceled
+            console.log(error);
+            return;
+        }
+
+        try {
+            const file = await fileHandle.getFile();
+            await this.importImageFile(file);
+        } catch(error) {
+            console.log(error);
+            this.showMessage("ERROR: import failed: " + error);
+        }
+    }
+
+    /**
+     * Imports and converts an image file to HGR format.
+     * @param {File} file - Image file to import
+     */
+    // Convert linear row number (0-191) to Apple II HGR interleaved memory offset
+    // Apple II HGR memory layout: if row is ABCDEFGH, offset is pppFGHCD EABAB000
+    rowToHgrOffset(row) {
+        const low = ((row & 0xc0) >> 1) | ((row & 0xc0) >> 3) | ((row & 0x08) << 4);
+        const high = ((row & 0x07) << 2) | ((row & 0x30) >> 4);
+        return (high << 8) | low;
+    }
+
+    async importImageFile(file) {
+        // Show progress message
+        this.showMessage(`Importing ${file.name}...`);
+
+        // Load image into HTMLImageElement
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+
+        await new Promise((resolve, reject) => {
+            img.onload = () => {
+                URL.revokeObjectURL(url);
+                resolve();
+            };
+            img.onerror = () => {
+                URL.revokeObjectURL(url);
+                reject(new Error("Failed to load image"));
+            };
+            img.src = url;
+        });
+
+        // Convert to HGR using Viterbi dithering with progress updates
+        const ditherer = new ImageDither();
+
+        // Progress callback to update UI during import
+        const progressCallback = (completed, total) => {
+            const percent = Math.round((completed / total) * 100);
+            this.showMessage(`Importing ${file.name}... ${percent}%`);
+        };
+
+        // Use async version to avoid blocking UI
+        const linearScreenData = await ditherer.ditherToHgrAsync(img, 40, 192, "two-pass", progressCallback);
+
+        // Apple II HGR uses an interleaved scanline layout, not sequential
+        // We need to convert from linear (row 0, row 1, row 2...) to interleaved format
+        // The interleaved format requires 8192 bytes because row offsets go up to ~0x1FF8
+        const interleavedData = new Uint8Array(8192); // Full HGR page size
+        for (let row = 0; row < 192; row++) {
+            const linearOffset = row * 40;
+            const interleavedOffset = this.rowToHgrOffset(row);
+            for (let col = 0; col < 40; col++) {
+                interleavedData[interleavedOffset + col] = linearScreenData[linearOffset + col];
+            }
+        }
+
+        // Create a properly formatted HGR file (8192 bytes)
+        // Use the interleaved data directly as it's already 8192 bytes
+        const hgrData = interleavedData;
+        hgrData[120] = 1; // Mode byte: 1 = color, 0 = mono
+        // Add signature "HGRTool" at offset 121
+        const signature = [0x48, 0x47, 0x52, 0x54, 0x6f, 0x6f, 0x6c];
+        hgrData.set(signature, 121);
+
+        // Create a new picture with the converted data
+        const baseName = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
+        const hgrName = `${baseName}.hgr`;
+
+        // Picture constructor: (name, type, fileHandle, arrayBuffer)
+        const picture = new Picture(hgrName, StdHiRes.FORMAT_NAME, undefined, hgrData.buffer);
+
+        // Add to picture list and switch to it
+        this.pictureList.push(picture);
+        this.setInitialScale(picture);
+        this.switchToPicture(picture);
+
+        this.showMessage(`Imported '${file.name}' as '${hgrName}'`);
     }
 
     //

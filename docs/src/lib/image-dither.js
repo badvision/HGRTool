@@ -26,6 +26,12 @@
 
 import Debug from "./debug.js";
 import NTSCRenderer from "./ntsc-renderer.js";
+import { CANONICAL_PATTERNS } from "./hgr-patterns.js";
+import { viterbiFullScanline } from "./viterbi-scanline.js";
+import { greedyDitherScanline, greedyDitherScanlineAsync } from "./greedy-dither.js";
+import { viterbiByteDither } from "./viterbi-byte-dither.js";
+import { nearestNeighborDitherScanline } from "./nearest-neighbor-dither.js";
+import { secondPassDitherScanline } from "./nearest-neighbor-second-pass.js";
 
 //
 // Dithering engine for image-to-HGR conversion.
@@ -58,6 +64,274 @@ export default class ImageDither {
         this.coefficients = ImageDither.FLOYD_STEINBERG;
         this.divisor = 16;
         this.ntscRenderer = new NTSCRenderer();
+        this.canonicalPatterns = CANONICAL_PATTERNS;
+    }
+
+    /**
+     * Unpacks a packed RGB value from NTSC renderer.
+     * NTSC renderer packs colors as: (r << 16) | (g << 8) | b
+     * @param {number} packed - Packed RGB value
+     * @returns {{r: number, g: number, b: number}} - RGB components
+     */
+    unpackRGB(packed) {
+        return {
+            r: (packed >> 16) & 0xFF,
+            g: (packed >> 8) & 0xFF,
+            b: packed & 0xFF
+        };
+    }
+
+    /**
+     * Calculates perceptual color distance using weighted RGB.
+     * Uses coefficients based on human color perception.
+     * @param {{r, g, b}} c1 - First color
+     * @param {{r, g, b}} c2 - Second color
+     * @returns {number} - Perceptual distance
+     */
+    perceptualDistance(c1, c2) {
+        const dr = c1.r - c2.r;
+        const dg = c1.g - c2.g;
+        const db = c1.b - c2.b;
+
+        // Weighted for human perception (ITU-R BT.601 luma coefficients)
+        return Math.sqrt(0.299 * dr * dr + 0.587 * dg * dg + 0.114 * db * db);
+    }
+
+    /**
+     * Calculates NTSC-aware error for a byte candidate.
+     * Renders the byte through NTSC simulation and compares to target colors.
+     * @param {number} prevByte - Previous byte in scanline
+     * @param {number} currByte - Current byte candidate
+     * @param {Array<{r, g, b}>} targetColors - Target colors for 7 pixels
+     * @param {number} xPos - Byte position in scanline (0-39)
+     * @returns {number} - Total error for this byte
+     */
+    calculateNTSCError(prevByte, currByte, targetColors, xPos) {
+        // Use existing hgrToDhgr lookup to get expanded bit pattern
+        const dhgrBits = NTSCRenderer.hgrToDhgr[prevByte][currByte];
+
+        let totalError = 0;
+
+        // CRITICAL FIX: The hgrToDhgr table produces a 28-bit word containing:
+        // - Bits 0-13: Previous byte's 7 HGR bits expanded to 14 DHGR bits
+        // - Bits 14-27: Current byte's 7 HGR bits expanded to 14 DHGR bits
+        //
+        // We need to extract patterns from the CURRENT byte's region (bits 14-27),
+        // not from the start of the word (bits 0-13).
+        //
+        // Each HGR pixel position needs a 7-bit DHGR pattern for NTSC color lookup.
+        // The pattern window slides across the current byte's DHGR bits.
+
+        // Evaluate each of the 7 pixels in this byte
+        for (let bitPos = 0; bitPos < 7; bitPos++) {
+            // Calculate starting position in DHGR bits for this pixel
+            // Current byte starts at DHGR bit 14, each HGR bit → 2 DHGR bits
+            const dhgrStartBit = 14 + (bitPos * 2);
+
+            // Extract 7-bit pattern for NTSC lookup
+            // Need to include context from previous bits for proper color rendering
+            const pattern = (dhgrBits >> (dhgrStartBit - 3)) & 0x7F;
+
+            // Calculate NTSC phase based on horizontal position
+            const pixelX = xPos * 7 + bitPos;
+            const phase = pixelX % 4;
+
+            // Get actual NTSC-rendered color from pre-computed palette
+            const ntscColor = NTSCRenderer.solidPalette[phase][pattern];
+            const rendered = this.unpackRGB(ntscColor);
+
+            // Calculate perceptual distance to target
+            const target = targetColors[bitPos];
+            totalError += this.perceptualDistance(rendered, target);
+        }
+
+        return totalError;
+    }
+
+    /**
+     * Finds the best byte pattern using exhaustive search of key candidates.
+     *
+     * CRITICAL FIX FOR WHITE RENDERING BUG:
+     *
+     * The original greedy bit-by-bit optimization failed catastrophically for white
+     * colors, producing 0x00 (black) instead of 0x7F/0xFF (white).
+     *
+     * ROOT CAUSE: NTSC color generation depends on BIT PATTERNS, not individual bits.
+     * Greedy optimization fails because:
+     * 1. Start with 0x00 or 0x7F
+     * 2. Flip one bit at a time
+     * 3. Each flip is evaluated in isolation
+     * 4. NTSC rendering changes drastically based on surrounding bits
+     * 5. Greedy algorithm gets stuck in local minima
+     *
+     * SOLUTION: Exhaustive search of 256 byte combinations.
+     *
+     * Performance: 256 error calculations per byte = ~10,000 per scanline.
+     * This is acceptable for the accuracy gain. Modern CPUs can handle this easily.
+     *
+     * Alternative considered: Multi-start greedy still failed because greedy
+     * optimization would turn OFF bits from 0x7F, arriving at 0x03 (mostly black).
+     *
+     * @param {number} prevByte - Previous byte in scanline
+     * @param {Array<{r, g, b}>} targetColors - Target colors for 7 pixels
+     * @param {number} xPos - Byte position in scanline (0-39)
+     * @returns {number} - Best byte value (0-255)
+     */
+    findBestBytePattern(prevByte, targetColors, xPos) {
+        let bestByte = 0;
+        let leastError = Infinity;
+
+        // Exhaustive search: test all 256 possible bytes
+        // This is the ONLY way to guarantee finding the global optimum
+        // because NTSC bit patterns are highly interdependent
+        for (let byte = 0; byte < 256; byte++) {
+            const error = this.calculateNTSCError(prevByte, byte, targetColors, xPos);
+            if (error < leastError) {
+                leastError = error;
+                bestByte = byte;
+            }
+        }
+
+        return bestByte;
+    }
+
+    /**
+     * Renders a byte through NTSC to get actual displayed colors.
+     * Uses the same pattern extraction logic as calculateNTSCError to ensure consistency.
+     * @param {number} prevByte - Previous byte in scanline
+     * @param {number} currByte - Current byte
+     * @param {number} xPos - Byte position in scanline (0-39)
+     * @returns {Array<{r, g, b}>} - Rendered colors for 7 pixels
+     */
+    renderNTSCColors(prevByte, currByte, xPos) {
+        const dhgrBits = NTSCRenderer.hgrToDhgr[prevByte][currByte];
+        const colors = [];
+
+        for (let bitPos = 0; bitPos < 7; bitPos++) {
+            // Same logic as calculateNTSCError: extract from current byte region
+            const dhgrStartBit = 14 + (bitPos * 2);
+            const pattern = (dhgrBits >> (dhgrStartBit - 3)) & 0x7F;
+            const pixelX = xPos * 7 + bitPos;
+            const phase = pixelX % 4;
+
+            const ntscColor = NTSCRenderer.solidPalette[phase][pattern];
+            colors.push(this.unpackRGB(ntscColor));
+        }
+
+        return colors;
+    }
+
+    /**
+     * Extracts target colors with accumulated error for a byte position.
+     * @param {Uint8ClampedArray} pixels - Source pixel data
+     * @param {Array} errorBuffer - Error accumulation buffer
+     * @param {number} byteX - Byte X position (0-39)
+     * @param {number} y - Y position (0-191)
+     * @param {number} pixelWidth - Width in pixels (280)
+     * @returns {Array<{r, g, b}>} - Target colors for 7 pixels
+     */
+    getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth) {
+        const targetColors = [];
+
+        for (let bit = 0; bit < 7; bit++) {
+            const pixelX = byteX * 7 + bit;
+            const pixelIdx = (y * pixelWidth + pixelX) * 4;
+
+            // Get base color from source
+            let r = pixels[pixelIdx];
+            let g = pixels[pixelIdx + 1];
+            let b = pixels[pixelIdx + 2];
+
+            // Add accumulated error if buffer exists
+            if (errorBuffer && errorBuffer[y] && errorBuffer[y][pixelX]) {
+                const err = errorBuffer[y][pixelX];
+                r = Math.max(0, Math.min(255, r + err[0]));
+                g = Math.max(0, Math.min(255, g + err[1]));
+                b = Math.max(0, Math.min(255, b + err[2]));
+            }
+
+            targetColors.push({ r, g, b });
+        }
+
+        return targetColors;
+    }
+
+    /**
+     * Propagates quantization error to neighboring pixels (Floyd-Steinberg).
+     * @param {Array} errorBuffer - Error accumulation buffer [y][x] = [r, g, b]
+     * @param {number} byteX - Byte X position (0-39)
+     * @param {number} y - Y position (0-191)
+     * @param {Array<{r, g, b}>} target - Target colors for 7 pixels
+     * @param {Array<{r, g, b}>} rendered - Rendered colors for 7 pixels
+     * @param {number} pixelWidth - Width in pixels (280)
+     */
+    propagateErrorToBuffer(errorBuffer, byteX, y, target, rendered, pixelWidth) {
+        // Propagate error for each of the 7 pixels in this byte
+        for (let bit = 0; bit < 7; bit++) {
+            const pixelX = byteX * 7 + bit;
+
+            // Calculate quantization error
+            const errorR = target[bit].r - rendered[bit].r;
+            const errorG = target[bit].g - rendered[bit].g;
+            const errorB = target[bit].b - rendered[bit].b;
+
+            // Floyd-Steinberg distribution:
+            //         X   7/16
+            //     3/16 5/16 1/16
+            const distributions = [
+                { dx: 1, dy: 0, weight: 7 / 16 },   // Right
+                { dx: -1, dy: 1, weight: 3 / 16 },  // Bottom-left
+                { dx: 0, dy: 1, weight: 5 / 16 },   // Bottom
+                { dx: 1, dy: 1, weight: 1 / 16 }    // Bottom-right
+            ];
+
+            for (const { dx, dy, weight } of distributions) {
+                const nx = pixelX + dx;
+                const ny = y + dy;
+
+                if (ny >= 0 && ny < errorBuffer.length && nx >= 0 && nx < pixelWidth) {
+                    if (!errorBuffer[ny][nx]) {
+                        errorBuffer[ny][nx] = [0, 0, 0];
+                    }
+
+                    errorBuffer[ny][nx][0] += errorR * weight;
+                    errorBuffer[ny][nx][1] += errorG * weight;
+                    errorBuffer[ny][nx][2] += errorB * weight;
+                }
+            }
+        }
+    }
+
+    /**
+     * Performs improved hybrid dithering for a single scanline.
+     * Uses bit-by-bit optimization in findBestBytePattern.
+     * @param {Uint8ClampedArray} pixels - Source pixel data
+     * @param {Array} errorBuffer - Error accumulation buffer [y][x] = [r, g, b]
+     * @param {number} y - Y position (0-191)
+     * @param {number} targetWidth - Width in bytes (40)
+     * @param {number} pixelWidth - Width in pixels (280)
+     * @returns {Uint8Array} - Scanline data (40 bytes)
+     */
+    ditherScanlineHybrid(pixels, errorBuffer, y, targetWidth, pixelWidth) {
+        const scanline = new Uint8Array(targetWidth);
+
+        for (let byteX = 0; byteX < targetWidth; byteX++) {
+            // Get target colors with accumulated error
+            const target = this.getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth);
+
+            // Find best byte using bit-by-bit optimization
+            const prevByte = byteX > 0 ? scanline[byteX - 1] : 0;
+            const bestByte = this.findBestBytePattern(prevByte, target, byteX);
+            scanline[byteX] = bestByte;
+
+            // Render through NTSC to get actual colors
+            const rendered = this.renderNTSCColors(prevByte, bestByte, byteX);
+
+            // Propagate quantization error Floyd-Steinberg style
+            this.propagateErrorToBuffer(errorBuffer, byteX, y, target, rendered, pixelWidth);
+        }
+
+        return scanline;
     }
 
     /**
@@ -65,10 +339,10 @@ export default class ImageDither {
      * @param {HTMLImageElement|ImageData} source - Source image
      * @param {number} targetWidth - Target width in bytes (40 for HGR)
      * @param {number} targetHeight - Target height (192 for HGR)
-     * @param {boolean} propagateError - Whether to use error diffusion
+     * @param {string} algorithm - Dithering algorithm: "hybrid" (default), "threshold", "viterbi", "greedy", "viterbi-byte"
      * @returns {Uint8Array} HGR screen data
      */
-    ditherToHgr(source, targetWidth, targetHeight, propagateError = true) {
+    ditherToHgr(source, targetWidth, targetHeight, algorithm = "hybrid") {
         // Create a canvas to work with the source image
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
@@ -90,57 +364,672 @@ export default class ImageDither {
             const imageData = ctx.getImageData(0, 0, pixelWidth, targetHeight);
             pixels = imageData.data;
         } else if (source instanceof ImageData) {
-            // Always rescale ImageData to exact HGR resolution, even if close
-            const tempCanvas = document.createElement("canvas");
-            tempCanvas.width = source.width;
-            tempCanvas.height = source.height;
-            const tempCtx = tempCanvas.getContext("2d");
-            tempCtx.putImageData(source, 0, 0);
+            // OPTIMIZATION: If source is already exact target size, use it directly
+            const isExactSize = (source.width === pixelWidth && source.height === targetHeight);
+            if (isExactSize) {
+                pixels = source.data;
+            } else {
+                // Need to rescale - use canvas operations
+                const tempCanvas = document.createElement("canvas");
+                tempCanvas.width = source.width;
+                tempCanvas.height = source.height;
+                const tempCtx = tempCanvas.getContext("2d");
+                tempCtx.putImageData(source, 0, 0);
 
-            // Draw scaled to target canvas with high-quality scaling
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = "high";
-            ctx.drawImage(tempCanvas, 0, 0, pixelWidth, targetHeight);
-            const imageData = ctx.getImageData(0, 0, pixelWidth, targetHeight);
-            pixels = imageData.data;
+                // Draw scaled to target canvas with high-quality scaling
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = "high";
+                ctx.drawImage(tempCanvas, 0, 0, pixelWidth, targetHeight);
+                const imageData = ctx.getImageData(0, 0, pixelWidth, targetHeight);
+                pixels = imageData.data;
+            }
         }
 
         // Create output HGR screen buffer
         const screen = new Uint8Array(targetWidth * targetHeight);
 
-        // Simple threshold dithering for baseline correctness
-        // For each byte, look at the 7 pixels it represents and determine bit values
-        for (let y = 0; y < targetHeight; y++) {
-            for (let byteX = 0; byteX < targetWidth; byteX++) {
-                let byte = 0;
-                let highBit = 0;
+        // Choose dithering algorithm
+        if (algorithm === "hybrid") {
+            // Hybrid Error Diffusion + Local Viterbi (NTSC-aware)
+            // Initialize error buffer
+            const errorBuffer = new Array(targetHeight);
+            for (let y = 0; y < targetHeight; y++) {
+                errorBuffer[y] = new Array(pixelWidth);
+                for (let x = 0; x < pixelWidth; x++) {
+                    errorBuffer[y][x] = [0, 0, 0];
+                }
+            }
 
-                // Process 7 pixels for this byte
-                for (let bit = 0; bit < 7; bit++) {
-                    const pixelX = byteX * 7 + bit;
-                    const pixelIdx = (y * pixelWidth + pixelX) * 4;
+            // Process each scanline with hybrid dithering
+            for (let y = 0; y < targetHeight; y++) {
+                const scanline = this.ditherScanlineHybrid(pixels, errorBuffer, y, targetWidth, pixelWidth);
+                screen.set(scanline, y * targetWidth);
+            }
 
-                    // Convert to grayscale
-                    const r = pixels[pixelIdx];
-                    const g = pixels[pixelIdx + 1];
-                    const b = pixels[pixelIdx + 2];
-                    const gray = (r + g + b) / 3;
+        } else if (algorithm === "threshold") {
+            // Simple threshold dithering (fast, baseline)
+            for (let y = 0; y < targetHeight; y++) {
+                for (let byteX = 0; byteX < targetWidth; byteX++) {
+                    let byte = 0;
+                    let highBit = 0;
 
-                    // Threshold: if brightness > 127, set bit
-                    if (gray > 127) {
-                        byte |= (1 << bit);
+                    // Process 7 pixels for this byte
+                    for (let bit = 0; bit < 7; bit++) {
+                        const pixelX = byteX * 7 + bit;
+                        const pixelIdx = (y * pixelWidth + pixelX) * 4;
+
+                        // Convert to grayscale
+                        const r = pixels[pixelIdx];
+                        const g = pixels[pixelIdx + 1];
+                        const b = pixels[pixelIdx + 2];
+                        const gray = (r + g + b) / 3;
+
+                        // Threshold: if brightness > 127, set bit
+                        if (gray > 127) {
+                            byte |= (1 << bit);
+                        }
+                    }
+
+                    // Determine high bit based on byte value
+                    // If most bits are set, use high bit
+                    const bitCount = (byte.toString(2).match(/1/g) || []).length;
+                    if (bitCount >= 4) {
+                        highBit = 0x80;
+                    }
+
+                    screen[y * targetWidth + byteX] = byte | highBit;
+                }
+            }
+
+        } else if (algorithm === "viterbi") {
+            // Full Viterbi optimization with Floyd-Steinberg error diffusion
+            // Initialize error buffer
+            const errorBuffer = new Array(targetHeight);
+            for (let y = 0; y < targetHeight; y++) {
+                errorBuffer[y] = new Array(pixelWidth);
+                for (let x = 0; x < pixelWidth; x++) {
+                    errorBuffer[y][x] = [0, 0, 0];
+                }
+            }
+
+            // PERFORMANCE: Create reusable buffers once for entire image
+            // This reduces allocations from 192 per image to just 3 total
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            // Process each scanline with Viterbi optimization
+            for (let y = 0; y < targetHeight; y++) {
+                const scanline = viterbiFullScanline(
+                    pixels,
+                    errorBuffer,
+                    y,
+                    targetWidth,
+                    pixelWidth,
+                    4, // beam width: K=4 gives 75% speedup vs K=16 (19s for full image)
+                    this.getTargetWithError.bind(this), // Pass helper function
+                    null, // no progress callback
+                    renderer, // reuse renderer
+                    imageData, // reuse imageData
+                    hgrBytes // reuse hgrBytes
+                );
+                screen.set(scanline, y * targetWidth);
+
+                // Propagate error to next scanline (Floyd-Steinberg style)
+                for (let byteX = 0; byteX < targetWidth; byteX++) {
+                    const prevByte = byteX > 0 ? scanline[byteX - 1] : 0;
+                    const currByte = scanline[byteX];
+
+                    // Get target colors and rendered colors
+                    const target = this.getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth);
+                    const rendered = this.renderNTSCColors(prevByte, currByte, byteX);
+
+                    // Propagate error
+                    this.propagateErrorToBuffer(errorBuffer, byteX, y, target, rendered, pixelWidth);
+                }
+            }
+
+        } else if (algorithm === "greedy") {
+            // Greedy byte-by-byte optimization with NTSC rendering
+            // Initialize error buffer (flat array for better performance)
+            const errorBuffer = new Array(targetHeight * pixelWidth);
+
+            // PERFORMANCE: Create reusable buffers once for entire image
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            // Process each scanline with greedy optimization
+            // Maintain history of previous scanlines for vertical smoothness
+            const scanlineHistory = [];
+            const MAX_HISTORY = 5; // Keep last 5 scanlines
+            for (let y = 0; y < targetHeight; y++) {
+                const scanline = greedyDitherScanline(
+                    pixels,
+                    errorBuffer,
+                    y,
+                    targetWidth,
+                    pixelWidth,
+                    targetHeight,
+                    renderer,
+                    imageData,
+                    hgrBytes,
+                    scanlineHistory
+                );
+                screen.set(scanline, y * targetWidth);
+
+                // Add current scanline to history (most recent first)
+                scanlineHistory.unshift(scanline);
+                // Keep only last MAX_HISTORY scanlines
+                if (scanlineHistory.length > MAX_HISTORY) {
+                    scanlineHistory.pop();
+                }
+            }
+
+        } else if (algorithm === "viterbi-byte") {
+            // Hybrid Viterbi-per-byte with byte-level error diffusion
+            // This algorithm addresses the sliding window artifact issue
+            // Initialize error buffer (flat array for better performance)
+            const errorBuffer = new Array(targetHeight * pixelWidth);
+
+            // PERFORMANCE: Create reusable buffers once for entire image
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            // Process each scanline with Viterbi byte-level optimization
+            for (let y = 0; y < targetHeight; y++) {
+                const scanline = viterbiByteDither(
+                    pixels,
+                    errorBuffer,
+                    y,
+                    targetWidth,
+                    pixelWidth,
+                    targetHeight,
+                    renderer,
+                    imageData,
+                    hgrBytes
+                );
+                screen.set(scanline, y * targetWidth);
+            }
+
+        } else if (algorithm === "nearest-neighbor") {
+            // Nearest-neighbor quantization (no error diffusion)
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            for (let y = 0; y < targetHeight; y++) {
+                const scanline = nearestNeighborDitherScanline(
+                    pixels,
+                    y,
+                    targetWidth,
+                    pixelWidth,
+                    renderer,
+                    imageData,
+                    hgrBytes
+                );
+                screen.set(scanline, y * targetWidth);
+            }
+
+        } else if (algorithm === "two-pass") {
+            // Two-pass: nearest-neighbor first, then error diffusion refinement
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            // First pass: nearest-neighbor (no error diffusion)
+            const firstPass = new Uint8Array(targetWidth * targetHeight);
+            for (let y = 0; y < targetHeight; y++) {
+                const scanline = nearestNeighborDitherScanline(
+                    pixels,
+                    y,
+                    targetWidth,
+                    pixelWidth,
+                    renderer,
+                    imageData,
+                    hgrBytes
+                );
+                firstPass.set(scanline, y * targetWidth);
+            }
+
+            // Second pass: refine with error diffusion
+            const errorBuffer = new Array(targetHeight * pixelWidth);
+            for (let y = 0; y < targetHeight; y++) {
+                const firstPassScanline = firstPass.slice(y * targetWidth, (y + 1) * targetWidth);
+                const scanline = secondPassDitherScanline(
+                    pixels,
+                    errorBuffer,
+                    y,
+                    targetWidth,
+                    pixelWidth,
+                    targetHeight,
+                    renderer,
+                    imageData,
+                    hgrBytes,
+                    firstPassScanline
+                );
+                screen.set(scanline, y * targetWidth);
+            }
+
+        } else {
+            throw new Error(`Unknown dithering algorithm: ${algorithm}`);
+        }
+
+        return screen;
+    }
+
+    /**
+     * Async version of ditherToHgr that doesn't block the UI thread.
+     * Yields to event loop every few scanlines to keep UI responsive.
+     *
+     * @param {HTMLImageElement|ImageData} source - Source image
+     * @param {number} targetWidth - Target width in bytes (40 for HGR)
+     * @param {number} targetHeight - Target height (192 for HGR)
+     * @param {string} algorithm - Dithering algorithm: "hybrid" (default), "threshold", "viterbi", "greedy", "greedy-parallel", "viterbi-byte"
+     * @param {Function} progressCallback - Optional callback(completed, total) for progress updates
+     * @returns {Promise<Uint8Array>} - HGR screen data
+     */
+    async ditherToHgrAsync(source, targetWidth, targetHeight, algorithm = "hybrid", progressCallback = null) {
+        // Create a canvas to work with the source image
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        // HGR is 280x192, so scale the source image appropriately
+        const pixelWidth = targetWidth * 7; // 7 pixels per byte
+        canvas.width = pixelWidth;
+        canvas.height = targetHeight;
+
+        // CRITICAL: Always rescale source to exact HGR resolution (280×192) before dithering
+        let pixels;
+        if (source instanceof HTMLImageElement) {
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = "high";
+            ctx.drawImage(source, 0, 0, pixelWidth, targetHeight);
+            const imageData = ctx.getImageData(0, 0, pixelWidth, targetHeight);
+            pixels = imageData.data;
+        } else if (source instanceof ImageData) {
+            const isExactSize = (source.width === pixelWidth && source.height === targetHeight);
+            if (isExactSize) {
+                pixels = source.data;
+            } else {
+                const tempCanvas = document.createElement("canvas");
+                tempCanvas.width = source.width;
+                tempCanvas.height = source.height;
+                const tempCtx = tempCanvas.getContext("2d");
+                tempCtx.putImageData(source, 0, 0);
+
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = "high";
+                ctx.drawImage(tempCanvas, 0, 0, pixelWidth, targetHeight);
+                const imageData = ctx.getImageData(0, 0, pixelWidth, targetHeight);
+                pixels = imageData.data;
+            }
+        }
+
+        // Create output HGR screen buffer
+        const screen = new Uint8Array(targetWidth * targetHeight);
+
+        // Choose dithering algorithm - focus on Viterbi since that's the slow one
+        if (algorithm === "viterbi") {
+            // Full Viterbi optimization with Floyd-Steinberg error diffusion
+            // Initialize error buffer
+            const errorBuffer = new Array(targetHeight);
+            for (let y = 0; y < targetHeight; y++) {
+                errorBuffer[y] = new Array(pixelWidth);
+                for (let x = 0; x < pixelWidth; x++) {
+                    errorBuffer[y][x] = [0, 0, 0];
+                }
+            }
+
+            // PERFORMANCE: Create reusable buffers once for entire image
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            // Process scanlines in batches to avoid blocking UI
+            const BATCH_SIZE = 10; // Process 10 scanlines before yielding
+
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                // Process this batch of scanlines
+                for (let y = batchStart; y < batchEnd; y++) {
+                    const scanline = viterbiFullScanline(
+                        pixels,
+                        errorBuffer,
+                        y,
+                        targetWidth,
+                        pixelWidth,
+                        4, // beam width: K=4 for performance
+                        this.getTargetWithError.bind(this),
+                        null, // no progress callback
+                        renderer,
+                        imageData,
+                        hgrBytes
+                    );
+                    screen.set(scanline, y * targetWidth);
+
+                    // Propagate error to next scanline
+                    for (let byteX = 0; byteX < targetWidth; byteX++) {
+                        const prevByte = byteX > 0 ? scanline[byteX - 1] : 0;
+                        const currByte = scanline[byteX];
+
+                        const target = this.getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth);
+                        const rendered = this.renderNTSCColors(prevByte, currByte, byteX);
+
+                        this.propagateErrorToBuffer(errorBuffer, byteX, y, target, rendered, pixelWidth);
                     }
                 }
 
-                // Determine high bit based on byte value
-                // If most bits are set, use high bit
-                const bitCount = (byte.toString(2).match(/1/g) || []).length;
-                if (bitCount >= 4) {
-                    highBit = 0x80;
+                // Report progress if callback provided
+                if (progressCallback) {
+                    progressCallback(batchEnd, targetHeight);
                 }
 
-                screen[y * targetWidth + byteX] = byte | highBit;
+                // Yield to event loop to keep UI responsive
+                // Only yield if there are more batches to process
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
             }
+
+        } else if (algorithm === "hybrid") {
+            // Hybrid algorithm - also make it async
+            const errorBuffer = new Array(targetHeight);
+            for (let y = 0; y < targetHeight; y++) {
+                errorBuffer[y] = new Array(pixelWidth);
+                for (let x = 0; x < pixelWidth; x++) {
+                    errorBuffer[y][x] = [0, 0, 0];
+                }
+            }
+
+            const BATCH_SIZE = 20; // Hybrid is faster, use larger batches
+
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                for (let y = batchStart; y < batchEnd; y++) {
+                    const scanline = this.ditherScanlineHybrid(pixels, errorBuffer, y, targetWidth, pixelWidth);
+                    screen.set(scanline, y * targetWidth);
+                }
+
+                if (progressCallback) {
+                    progressCallback(batchEnd, targetHeight);
+                }
+
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+
+        } else if (algorithm === "threshold") {
+            // Threshold is very fast, but still make it async for consistency
+            const BATCH_SIZE = 40;
+
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                for (let y = batchStart; y < batchEnd; y++) {
+                    for (let byteX = 0; byteX < targetWidth; byteX++) {
+                        let byte = 0;
+                        let highBit = 0;
+
+                        for (let bit = 0; bit < 7; bit++) {
+                            const pixelX = byteX * 7 + bit;
+                            const pixelIdx = (y * pixelWidth + pixelX) * 4;
+
+                            const r = pixels[pixelIdx];
+                            const g = pixels[pixelIdx + 1];
+                            const b = pixels[pixelIdx + 2];
+                            const gray = (r + g + b) / 3;
+
+                            if (gray > 127) {
+                                byte |= (1 << bit);
+                            }
+                        }
+
+                        const bitCount = (byte.toString(2).match(/1/g) || []).length;
+                        if (bitCount >= 4) {
+                            highBit = 0x80;
+                        }
+
+                        screen[y * targetWidth + byteX] = byte | highBit;
+                    }
+                }
+
+                if (progressCallback) {
+                    progressCallback(batchEnd, targetHeight);
+                }
+
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+
+        } else if (algorithm === "greedy") {
+            // Greedy byte-by-byte optimization with NTSC rendering (async, sequential)
+            const errorBuffer = new Array(targetHeight * pixelWidth);
+
+            // PERFORMANCE: Create reusable buffers once for entire image
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            // Process scanlines in batches to avoid blocking UI
+            const BATCH_SIZE = 10; // Greedy is slower, use smaller batches
+            const scanlineHistory = [];
+            const MAX_HISTORY = 5; // Keep last 5 scanlines
+
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                for (let y = batchStart; y < batchEnd; y++) {
+                    const scanline = greedyDitherScanline(
+                        pixels,
+                        errorBuffer,
+                        y,
+                        targetWidth,
+                        pixelWidth,
+                        targetHeight,
+                        renderer,
+                        imageData,
+                        hgrBytes,
+                        scanlineHistory
+                    );
+                    screen.set(scanline, y * targetWidth);
+
+                    // Maintain rolling history of last N scanlines for vertical smoothness
+                    scanlineHistory.unshift(scanline);  // Add to front
+                    if (scanlineHistory.length > MAX_HISTORY) {
+                        scanlineHistory.pop();  // Remove oldest
+                    }
+                }
+
+                if (progressCallback) {
+                    progressCallback(batchEnd, targetHeight);
+                }
+
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+
+        } else if (algorithm === "greedy-parallel") {
+            // Greedy byte-by-byte optimization with parallel hi-bit testing
+            const errorBuffer = new Array(targetHeight * pixelWidth);
+
+            // PERFORMANCE: Create reusable renderer (buffers created per task to avoid races)
+            const renderer = new NTSCRenderer();
+
+            // Process scanlines in batches to avoid blocking UI
+            const BATCH_SIZE = 10; // Greedy is slower, use smaller batches
+
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                for (let y = batchStart; y < batchEnd; y++) {
+                    const scanline = await greedyDitherScanlineAsync(
+                        pixels,
+                        errorBuffer,
+                        y,
+                        targetWidth,
+                        pixelWidth,
+                        targetHeight,
+                        renderer
+                    );
+                    screen.set(scanline, y * targetWidth);
+                }
+
+                if (progressCallback) {
+                    progressCallback(batchEnd, targetHeight);
+                }
+
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+
+        } else if (algorithm === "viterbi-byte") {
+            // Hybrid Viterbi-per-byte with byte-level error diffusion (async)
+            const errorBuffer = new Array(targetHeight * pixelWidth);
+
+            // PERFORMANCE: Create reusable buffers once for entire image
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            // Process scanlines in batches to avoid blocking UI
+            const BATCH_SIZE = 10; // Similar performance to greedy
+
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                for (let y = batchStart; y < batchEnd; y++) {
+                    const scanline = viterbiByteDither(
+                        pixels,
+                        errorBuffer,
+                        y,
+                        targetWidth,
+                        pixelWidth,
+                        targetHeight,
+                        renderer,
+                        imageData,
+                        hgrBytes
+                    );
+                    screen.set(scanline, y * targetWidth);
+                }
+
+                if (progressCallback) {
+                    progressCallback(batchEnd, targetHeight);
+                }
+
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+
+        } else if (algorithm === "nearest-neighbor") {
+            // Nearest-neighbor quantization (no error diffusion) - async version
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            const BATCH_SIZE = 10; // Process 10 scanlines before yielding
+
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                for (let y = batchStart; y < batchEnd; y++) {
+                    const scanline = nearestNeighborDitherScanline(
+                        pixels,
+                        y,
+                        targetWidth,
+                        pixelWidth,
+                        renderer,
+                        imageData,
+                        hgrBytes
+                    );
+                    screen.set(scanline, y * targetWidth);
+                }
+
+                if (progressCallback) {
+                    progressCallback(batchEnd, targetHeight);
+                }
+
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+
+        } else if (algorithm === "two-pass") {
+            // Two-pass: nearest-neighbor first, then error diffusion refinement (async)
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            const BATCH_SIZE = 10; // Process 10 scanlines before yielding
+
+            // First pass: nearest-neighbor (no error diffusion)
+            const firstPass = new Uint8Array(targetWidth * targetHeight);
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                for (let y = batchStart; y < batchEnd; y++) {
+                    const scanline = nearestNeighborDitherScanline(
+                        pixels,
+                        y,
+                        targetWidth,
+                        pixelWidth,
+                        renderer,
+                        imageData,
+                        hgrBytes
+                    );
+                    firstPass.set(scanline, y * targetWidth);
+                }
+
+                if (progressCallback) {
+                    progressCallback(batchEnd / 2, targetHeight); // First pass is 50% of work
+                }
+
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+
+            // Second pass: refine with error diffusion
+            const errorBuffer = new Array(targetHeight * pixelWidth);
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                for (let y = batchStart; y < batchEnd; y++) {
+                    const firstPassScanline = firstPass.slice(y * targetWidth, (y + 1) * targetWidth);
+                    const scanline = secondPassDitherScanline(
+                        pixels,
+                        errorBuffer,
+                        y,
+                        targetWidth,
+                        pixelWidth,
+                        targetHeight,
+                        renderer,
+                        imageData,
+                        hgrBytes,
+                        firstPassScanline
+                    );
+                    screen.set(scanline, y * targetWidth);
+                }
+
+                if (progressCallback) {
+                    progressCallback(targetHeight / 2 + batchEnd / 2, targetHeight); // Second pass is remaining 50%
+                }
+
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+
+        } else {
+            throw new Error(`Unknown dithering algorithm: ${algorithm}`);
         }
 
         return screen;
