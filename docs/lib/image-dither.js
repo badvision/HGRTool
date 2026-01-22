@@ -533,9 +533,7 @@ export default class ImageDither {
                     4, // beam width: K=4 gives 75% speedup vs K=16 (19s for full image)
                     this.getTargetWithError.bind(this), // Pass helper function
                     null, // no progress callback
-                    renderer, // reuse renderer
-                    imageData, // reuse imageData
-                    hgrBytes // reuse hgrBytes
+                    this // pass ImageDither instance with centralized functions
                 );
                 screen.set(scanline, y * targetWidth);
 
@@ -575,9 +573,7 @@ export default class ImageDither {
                     targetWidth,
                     pixelWidth,
                     targetHeight,
-                    renderer,
-                    imageData,
-                    hgrBytes,
+                    this,
                     scanlineHistory
                 );
                 screen.set(scanline, y * targetWidth);
@@ -709,9 +705,7 @@ export default class ImageDither {
                     4, // beam width: K=4 for performance
                     this.getTargetWithError.bind(this),
                     null, // no progress callback
-                    renderer,
-                    imageData,
-                    hgrBytes,
+                    this, // pass ImageDither instance with centralized functions
                     structureHints // pass structure hints to Viterbi
                 );
                 screen.set(scanline, y * targetWidth);
@@ -820,9 +814,7 @@ export default class ImageDither {
                         4, // beam width: K=4 for performance
                         this.getTargetWithError.bind(this),
                         null, // no progress callback
-                        renderer,
-                        imageData,
-                        hgrBytes
+                        this // pass ImageDither instance with centralized functions
                     );
                     screen.set(scanline, y * targetWidth);
 
@@ -948,9 +940,7 @@ export default class ImageDither {
                         targetWidth,
                         pixelWidth,
                         targetHeight,
-                        renderer,
-                        imageData,
-                        hgrBytes,
+                        this,
                         scanlineHistory
                     );
                     screen.set(scanline, y * targetWidth);
@@ -992,7 +982,7 @@ export default class ImageDither {
                         targetWidth,
                         pixelWidth,
                         targetHeight,
-                        renderer
+                        this
                     );
                     screen.set(scanline, y * targetWidth);
                 }
@@ -1183,9 +1173,7 @@ export default class ImageDither {
                         4, // beam width: K=4 for performance
                         this.getTargetWithError.bind(this),
                         null, // no progress callback
-                        renderer,
-                        imageData,
-                        hgrBytes,
+                        this, // pass ImageDither instance with centralized functions
                         structureHints // pass structure hints to Viterbi
                     );
                     screen.set(scanline, y * targetWidth);

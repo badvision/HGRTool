@@ -38,6 +38,7 @@
 import ViterbiTrellis from './viterbi-trellis.js';
 import { calculateTransitionCost } from './viterbi-cost-function.js';
 import NTSCRenderer from './ntsc-renderer.js';
+import ImageDither from './image-dither.js';
 
 /**
  * Performs full Viterbi optimization for a single HGR scanline.
@@ -45,8 +46,8 @@ import NTSCRenderer from './ntsc-renderer.js';
  * Uses dynamic programming with beam search to find the optimal sequence of
  * 40 bytes that minimizes NTSC rendering error for the target pixel colors.
  *
- * PERFORMANCE OPTIMIZATION: Reuses renderer and buffer objects to avoid
- * millions of allocations per image. Caller should create these once and pass them in.
+ * CRITICAL UPDATE: Now uses centralized ImageDither.calculateNTSCError for consistent
+ * phase-corrected evaluation across all dithering algorithms.
  *
  * STRUCTURE-AWARE OPTIMIZATION: When structure hints are provided, adjusts cost
  * function penalties based on image structure (EDGE, TEXTURE, SMOOTH) to reduce
@@ -60,9 +61,7 @@ import NTSCRenderer from './ntsc-renderer.js';
  * @param {number} beamWidth - Number of states to keep at each position (default 16)
  * @param {Function} getTargetWithError - Function to extract target colors with error
  * @param {Function} progressCallback - Optional callback(byteX, targetWidth) for progress updates
- * @param {NTSCRenderer} renderer - Optional reusable NTSC renderer (created if not provided)
- * @param {ImageData} imageData - Optional reusable ImageData buffer (created if not provided)
- * @param {Uint8Array} hgrBytes - Optional reusable HGR scanline buffer (created if not provided)
+ * @param {ImageDither} imageDither - Optional ImageDither instance (created if not provided)
  * @param {Array<Array<string>>} structureHints - Optional structure hints [y][x] (EDGE, TEXTURE, SMOOTH)
  * @returns {Uint8Array} - Optimal scanline data (40 bytes)
  */
@@ -75,19 +74,15 @@ export function viterbiFullScanline(
     beamWidth = 16,
     getTargetWithError,
     progressCallback = null,
-    renderer = null,
-    imageData = null,
-    hgrBytes = null,
+    imageDither = null,
     structureHints = null
 ) {
     const trellis = new ViterbiTrellis(targetWidth, beamWidth);
 
-    // PERFORMANCE: Create reusable objects if not provided
+    // PERFORMANCE: Create ImageDither instance if not provided
     // For single scanline calls: create once per scanline
     // For multi-scanline calls: caller creates once and passes in
-    if (!renderer) renderer = new NTSCRenderer();
-    if (!imageData) imageData = new ImageData(560, 1);
-    if (!hgrBytes) hgrBytes = new Uint8Array(40);
+    if (!imageDither) imageDither = new ImageDither();
 
     // Helper function to get structure hint for a byte position
     const getStructureHint = (byteX) => {
@@ -106,7 +101,7 @@ export function viterbiFullScanline(
 
     for (let byte = 0; byte < 256; byte++) {
         // Calculate initial cost (transition from 0x00 to this byte)
-        const cost = calculateTransitionCost(0x00, byte, targetColors0, 0, renderer, imageData, hgrBytes, hint0);
+        const cost = calculateTransitionCost(0x00, byte, targetColors0, 0, imageDither, hint0);
 
         trellis.setState(0, byte, {
             byte: byte,
@@ -134,9 +129,7 @@ export function viterbiFullScanline(
                     nextByte,
                     targetColors,
                     byteX,
-                    renderer,
-                    imageData,
-                    hgrBytes,
+                    imageDither,
                     hint
                 );
 

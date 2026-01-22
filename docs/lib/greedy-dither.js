@@ -32,6 +32,7 @@
  */
 
 import NTSCRenderer from './ntsc-renderer.js';
+import ImageDither from './image-dither.js';
 
 /**
  * Smoothness penalty to discourage repetitive byte patterns.
@@ -107,55 +108,17 @@ function getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth) {
 }
 
 /**
- * Calculates error for a candidate byte using actual NTSC rendering.
+ * Calculates error for a candidate byte using centralized NTSC functions.
+ * Uses ImageDither.calculateNTSCError for consistent phase-corrected evaluation.
  * @param {number} prevByte - Previous byte in scanline (or 0 if first)
  * @param {number} candidateByte - Byte value to test (0-255)
  * @param {Array<{r: number, g: number, b: number}>} targetColors - Target colors for 7 pixels
  * @param {number} byteX - Byte X position (0-39)
- * @param {NTSCRenderer} renderer - NTSC renderer instance
- * @param {ImageData} imageData - Reusable ImageData buffer (560x1)
- * @param {Uint8Array} hgrBytes - Reusable HGR byte buffer (40 bytes)
+ * @param {ImageDither} imageDither - ImageDither instance with centralized functions
  * @returns {number} - Total perceptual error for this byte
  */
-function calculateByteError(prevByte, candidateByte, targetColors, byteX, renderer, imageData, hgrBytes, scanlineSoFar) {
-    // Restore committed scanline context (all bytes before byteX)
-    for (let i = 0; i < byteX; i++) {
-        hgrBytes[i] = scanlineSoFar[i];
-    }
-    // Clear rest of scanline
-    for (let i = byteX; i < hgrBytes.length; i++) {
-        hgrBytes[i] = 0;
-    }
-
-    // Set candidate byte
-    hgrBytes[byteX] = candidateByte;
-
-    // Clear imageData
-    for (let i = 0; i < imageData.data.length; i++) {
-        imageData.data[i] = 0;
-    }
-
-    // Render this scanline through NTSC
-    renderer.renderHgrScanline(imageData, hgrBytes, 0, 0);
-
-    // Extract rendered colors for the 7 pixels in this byte
-    // Each HGR pixel maps to 2 NTSC pixels (280 HGR -> 560 NTSC)
-    let totalError = 0;
-    for (let bitPos = 0; bitPos < 7; bitPos++) {
-        const pixelX = byteX * 7 + bitPos;
-        const ntscX = pixelX * 2; // HGR pixel to NTSC pixel
-        const idx = ntscX * 4; // RGBA index
-
-        const rendered = {
-            r: imageData.data[idx],
-            g: imageData.data[idx + 1],
-            b: imageData.data[idx + 2]
-        };
-
-        totalError += perceptualDistanceSquared(rendered, targetColors[bitPos]);
-    }
-
-    return totalError;
+function calculateByteError(prevByte, candidateByte, targetColors, byteX, imageDither) {
+    return imageDither.calculateNTSCError(prevByte, candidateByte, targetColors, byteX);
 }
 
 /**
@@ -231,21 +194,16 @@ function propagateError(errorBuffer, byteX, y, target, rendered, pixelWidth, hei
 
 /**
  * Tests a range of byte values and returns the best candidate.
- * Creates separate buffers to avoid race conditions when running in parallel.
+ * Uses centralized calculateNTSCError for consistent evaluation.
  * @param {number} prevByte - Previous byte in scanline
  * @param {number} startByte - Start of byte range (inclusive)
  * @param {number} endByte - End of byte range (inclusive)
  * @param {Array<{r: number, g: number, b: number}>} targetColors - Target colors for 7 pixels
  * @param {number} byteX - Byte X position (0-39)
- * @param {NTSCRenderer} renderer - NTSC renderer instance
- * @param {Uint8Array} scanlineSoFar - Committed scanline bytes
+ * @param {ImageDither} imageDither - ImageDither instance with centralized functions
  * @returns {Promise<{byte: number, error: number}>} - Best byte and its error
  */
-async function testByteGroup(prevByte, startByte, endByte, targetColors, byteX, renderer, scanlineSoFar) {
-    // Create separate buffers for this task to avoid race conditions
-    const imageData = new ImageData(560, 1);
-    const hgrBytes = new Uint8Array(40);
-
+async function testByteGroup(prevByte, startByte, endByte, targetColors, byteX, imageDither) {
     let bestByte = startByte;
     let bestError = Infinity;
 
@@ -255,10 +213,7 @@ async function testByteGroup(prevByte, startByte, endByte, targetColors, byteX, 
             candidateByte,
             targetColors,
             byteX,
-            renderer,
-            imageData,
-            hgrBytes,
-            scanlineSoFar
+            imageDither
         );
 
         // Smoothness penalty disabled - color accuracy is more important
@@ -280,19 +235,18 @@ async function testByteGroup(prevByte, startByte, endByte, targetColors, byteX, 
 
 /**
  * Dithers a single scanline using greedy byte-by-byte optimization (synchronous version).
+ * Uses centralized calculateNTSCError and renderNTSCColors for consistency.
  * @param {Uint8ClampedArray} pixels - Source pixel data
  * @param {Array} errorBuffer - Error buffer (flat array)
  * @param {number} y - Y position (0-191)
  * @param {number} targetWidth - Width in bytes (40)
  * @param {number} pixelWidth - Width in pixels (280)
  * @param {number} height - Height in pixels (192)
- * @param {NTSCRenderer} renderer - Reusable NTSC renderer
- * @param {ImageData} imageData - Reusable ImageData buffer (560x1)
- * @param {Uint8Array} hgrBytes - Reusable HGR byte buffer (40 bytes)
+ * @param {ImageDither} imageDither - ImageDither instance with centralized functions
  * @param {Array<Uint8Array>} scanlineHistory - Array of previous scanlines for vertical smoothness (most recent first)
  * @returns {Uint8Array} - Scanline data (40 bytes)
  */
-export function greedyDitherScanline(pixels, errorBuffer, y, targetWidth, pixelWidth, height, renderer, imageData, hgrBytes, scanlineHistory = []) {
+export function greedyDitherScanline(pixels, errorBuffer, y, targetWidth, pixelWidth, height, imageDither, scanlineHistory = []) {
     const scanline = new Uint8Array(targetWidth);
 
     for (let byteX = 0; byteX < targetWidth; byteX++) {
@@ -311,10 +265,7 @@ export function greedyDitherScanline(pixels, errorBuffer, y, targetWidth, pixelW
                 candidateByte,
                 targetColors,
                 byteX,
-                renderer,
-                imageData,
-                hgrBytes,
-                scanline
+                imageDither
             );
 
             // Add smoothness penalty with history decay to discourage vertical byte repetition
@@ -335,35 +286,8 @@ export function greedyDitherScanline(pixels, errorBuffer, y, targetWidth, pixelW
         // Commit best byte
         scanline[byteX] = bestByte;
 
-        // Render to get actual colors for error diffusion
-        // CRITICAL: Must restore full scanline context for NTSC rendering
-        for (let i = 0; i <= byteX; i++) {
-            hgrBytes[i] = scanline[i];
-        }
-        // Clear rest of scanline
-        for (let i = byteX + 1; i < hgrBytes.length; i++) {
-            hgrBytes[i] = 0;
-        }
-
-        // Clear imageData
-        for (let i = 0; i < imageData.data.length; i++) {
-            imageData.data[i] = 0;
-        }
-
-        renderer.renderHgrScanline(imageData, hgrBytes, 0, 0);
-
-        // Extract rendered colors
-        const renderedColors = [];
-        for (let bitPos = 0; bitPos < 7; bitPos++) {
-            const pixelX = byteX * 7 + bitPos;
-            const ntscX = pixelX * 2;
-            const idx = ntscX * 4;
-            renderedColors.push({
-                r: imageData.data[idx],
-                g: imageData.data[idx + 1],
-                b: imageData.data[idx + 2]
-            });
-        }
+        // Get actual rendered colors for error diffusion using centralized function
+        const renderedColors = imageDither.renderNTSCColors(prevByte, bestByte, byteX);
 
         // Propagate error (Floyd-Steinberg)
         propagateError(errorBuffer, byteX, y, targetColors, renderedColors, pixelWidth, height);
@@ -375,16 +299,17 @@ export function greedyDitherScanline(pixels, errorBuffer, y, targetWidth, pixelW
 /**
  * Dithers a single scanline using greedy byte-by-byte optimization with parallel hi-bit testing.
  * Tests bytes 0x00-0x7F and 0x80-0xFF in parallel for potential speedup.
+ * Uses centralized calculateNTSCError and renderNTSCColors for consistency.
  * @param {Uint8ClampedArray} pixels - Source pixel data
  * @param {Array} errorBuffer - Error buffer (flat array)
  * @param {number} y - Y position (0-191)
  * @param {number} targetWidth - Width in bytes (40)
  * @param {number} pixelWidth - Width in pixels (280)
  * @param {number} height - Height in pixels (192)
- * @param {NTSCRenderer} renderer - Reusable NTSC renderer
+ * @param {ImageDither} imageDither - ImageDither instance with centralized functions
  * @returns {Promise<Uint8Array>} - Scanline data (40 bytes)
  */
-export async function greedyDitherScanlineAsync(pixels, errorBuffer, y, targetWidth, pixelWidth, height, renderer) {
+export async function greedyDitherScanlineAsync(pixels, errorBuffer, y, targetWidth, pixelWidth, height, imageDither) {
     const scanline = new Uint8Array(targetWidth);
 
     for (let byteX = 0; byteX < targetWidth; byteX++) {
@@ -395,8 +320,8 @@ export async function greedyDitherScanlineAsync(pixels, errorBuffer, y, targetWi
         // Test both hi-bit groups in parallel
         // Each group gets its own buffers to avoid race conditions
         const [result0, result1] = await Promise.all([
-            testByteGroup(prevByte, 0x00, 0x7F, targetColors, byteX, renderer, scanline),
-            testByteGroup(prevByte, 0x80, 0xFF, targetColors, byteX, renderer, scanline)
+            testByteGroup(prevByte, 0x00, 0x7F, targetColors, byteX, imageDither),
+            testByteGroup(prevByte, 0x80, 0xFF, targetColors, byteX, imageDither)
         ]);
 
         // Pick best from both groups
@@ -406,37 +331,8 @@ export async function greedyDitherScanlineAsync(pixels, errorBuffer, y, targetWi
         // Commit best byte
         scanline[byteX] = bestByte;
 
-        // Render to get actual colors for error diffusion
-        // Create temporary buffers for final render
-        const imageData = new ImageData(560, 1);
-        const hgrBytes = new Uint8Array(40);
-
-        // Restore scanline context (match sequential version exactly)
-        for (let i = 0; i < byteX; i++) {
-            hgrBytes[i] = scanline[i];
-        }
-        hgrBytes[byteX] = bestByte;
-        // Rest of buffer is already zeroed by Uint8Array constructor
-
-        // Clear imageData (match sequential version)
-        for (let i = 0; i < imageData.data.length; i++) {
-            imageData.data[i] = 0;
-        }
-
-        renderer.renderHgrScanline(imageData, hgrBytes, 0, 0);
-
-        // Extract rendered colors
-        const renderedColors = [];
-        for (let bitPos = 0; bitPos < 7; bitPos++) {
-            const pixelX = byteX * 7 + bitPos;
-            const ntscX = pixelX * 2;
-            const idx = ntscX * 4;
-            renderedColors.push({
-                r: imageData.data[idx],
-                g: imageData.data[idx + 1],
-                b: imageData.data[idx + 2]
-            });
-        }
+        // Get actual rendered colors for error diffusion using centralized function
+        const renderedColors = imageDither.renderNTSCColors(prevByte, bestByte, byteX);
 
         // Propagate error (Floyd-Steinberg)
         propagateError(errorBuffer, byteX, y, targetColors, renderedColors, pixelWidth, height);
