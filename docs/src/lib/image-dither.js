@@ -83,19 +83,41 @@ export default class ImageDither {
     }
 
     /**
-     * Calculates perceptual color distance using weighted RGB.
-     * Uses coefficients based on human color perception.
+     * Convert RGB to YIQ color space (NTSC native color space).
+     * @param {{r, g, b}} rgb - RGB color (0-255 range)
+     * @returns {{y, i, q}} - YIQ color (all in 0-1 range)
+     */
+    rgbToYiq(rgb) {
+        const r = rgb.r / 255;
+        const g = rgb.g / 255;
+        const b = rgb.b / 255;
+
+        // NTSC YIQ transformation matrix
+        const y = 0.299 * r + 0.587 * g + 0.114 * b;
+        const i = 0.596 * r - 0.275 * g - 0.321 * b;
+        const q = 0.212 * r - 0.523 * g + 0.311 * b;
+
+        return { y, i, q };
+    }
+
+    /**
+     * Calculates perceptual color distance using YIQ color space.
+     * YIQ is the native NTSC color space, so comparing in YIQ gives
+     * more accurate error measurement for NTSC artifact colors.
      * @param {{r, g, b}} c1 - First color
      * @param {{r, g, b}} c2 - Second color
      * @returns {number} - Perceptual distance
      */
     perceptualDistance(c1, c2) {
-        const dr = c1.r - c2.r;
-        const dg = c1.g - c2.g;
-        const db = c1.b - c2.b;
+        const yiq1 = this.rgbToYiq(c1);
+        const yiq2 = this.rgbToYiq(c2);
 
-        // Weighted for human perception (ITU-R BT.601 luma coefficients)
-        return Math.sqrt(0.299 * dr * dr + 0.587 * dg * dg + 0.114 * db * db);
+        const dy = yiq1.y - yiq2.y;
+        const di = yiq1.i - yiq2.i;
+        const dq = yiq1.q - yiq2.q;
+
+        // Equal weighting in YIQ space - let NTSC color space do the work
+        return Math.sqrt(dy * dy + di * di + dq * dq);
     }
 
     /**
@@ -133,9 +155,11 @@ export default class ImageDither {
             // Need to include context from previous bits for proper color rendering
             const pattern = (dhgrBits >> (dhgrStartBit - 3)) & 0x7F;
 
-            // Calculate NTSC phase based on horizontal position
+            // Phase calculation: NTSC repeats every 4 DHGR pixels
+            // Each HGR pixel = 2 DHGR pixels, so phase = (hgrPixel * 2) % 4
+            // Subtract 1 to align with NTSC renderer phase
             const pixelX = xPos * 7 + bitPos;
-            const phase = pixelX % 4;
+            const phase = ((pixelX * 2) + 3) % 4;  // +3 mod 4 = -1
 
             // Get actual NTSC-rendered color from pre-computed palette
             const ntscColor = NTSCRenderer.solidPalette[phase][pattern];
@@ -212,8 +236,12 @@ export default class ImageDither {
             // Same logic as calculateNTSCError: extract from current byte region
             const dhgrStartBit = 14 + (bitPos * 2);
             const pattern = (dhgrBits >> (dhgrStartBit - 3)) & 0x7F;
+
+            // Phase calculation: NTSC repeats every 4 DHGR pixels
+            // Each HGR pixel = 2 DHGR pixels, so phase = (hgrPixel * 2) % 4
+            // Subtract 1 to align with NTSC renderer phase
             const pixelX = xPos * 7 + bitPos;
-            const phase = pixelX % 4;
+            const phase = ((pixelX * 2) + 3) % 4;  // +3 mod 4 = -1
 
             const ntscColor = NTSCRenderer.solidPalette[phase][pattern];
             colors.push(this.unpackRGB(ntscColor));
@@ -337,13 +365,31 @@ export default class ImageDither {
             // Get target colors with accumulated error
             const target = this.getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth);
 
-            // Find best byte using bit-by-bit optimization
-            const prevByte = byteX > 0 ? scanline[byteX - 1] : 0;
-            const bestByte = this.findBestBytePattern(prevByte, target, byteX);
+            // Find best byte using exhaustive search
+            let prevByte, bestByte;
+
+            if (byteX === 0) {
+                // CRITICAL FIX: First byte of scanline - test both hi-bit palettes
+                // to avoid palette selection bias. Test candidates from both contexts
+                // but evaluate them with prevByte=0 (the actual scanline start context).
+                const byte0 = this.findBestBytePattern(0x00, target, byteX);  // best from hi-bit 0 context
+                const byte1 = this.findBestBytePattern(0x80, target, byteX);  // best from hi-bit 1 context
+
+                // Evaluate both with prevByte=0 (actual context) for fair comparison
+                const error0 = this.calculateNTSCError(0x00, byte0, target, byteX);
+                const error1 = this.calculateNTSCError(0x00, byte1, target, byteX);
+
+                bestByte = (error0 <= error1) ? byte0 : byte1;
+            } else {
+                prevByte = scanline[byteX - 1];
+                bestByte = this.findBestBytePattern(prevByte, target, byteX);
+            }
+
             scanline[byteX] = bestByte;
 
             // Render through NTSC to get actual colors
-            const rendered = this.renderNTSCColors(prevByte, bestByte, byteX);
+            const actualPrevByte = byteX > 0 ? scanline[byteX - 1] : 0;
+            const rendered = this.renderNTSCColors(actualPrevByte, bestByte, byteX);
 
             // Propagate quantization error Floyd-Steinberg style
             this.propagateErrorToBuffer(errorBuffer, byteX, y, target, rendered, pixelWidth);

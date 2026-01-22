@@ -1,0 +1,140 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - button " New Create blank image." [ref=e4]:
+        - generic [ref=e5]: 
+        - text: New
+        - generic [ref=e6]: Create blank image.
+      - button " Open" [ref=e7]:
+        - generic [ref=e8]: 
+        - text: Open
+      - button " Import" [ref=e9]:
+        - generic [ref=e10]: 
+        - text: Import
+      - button " Save" [ref=e11]:
+        - generic [ref=e12]: 
+        - text: Save
+      - button " Save As" [ref=e13]:
+        - generic [ref=e14]: 
+        - text: Save As
+      - button " Close" [ref=e15]:
+        - generic [ref=e16]: 
+        - text: Close
+      - button " Cut" [ref=e18]:
+        - generic [ref=e19]: 
+        - text: Cut
+      - button " Copy" [ref=e20]:
+        - generic [ref=e21]: 
+        - text: Copy
+      - button " Paste" [ref=e22]:
+        - generic [ref=e23]: 
+        - text: Paste
+      - button " Undo" [ref=e24]:
+        - generic [ref=e25]: 
+        - text: Undo
+      - button " Redo" [ref=e26]:
+        - generic [ref=e27]: 
+        - text: Redo
+    - generic [ref=e28]:
+      - generic [ref=e29]: Images
+      - button [ref=e30]
+      - button [ref=e32]
+      - button [ref=e34]
+      - button [ref=e36]
+      - button [ref=e38]
+      - button [ref=e40]
+      - button [ref=e42]
+      - button [ref=e44]
+    - generic [ref=e46]:
+      - generic [ref=e47]:
+        - text: cursor
+        - generic [ref=e48]:
+          - status [ref=e49]: "-"
+          - text: ","
+          - status [ref=e50]: "-"
+      - generic [ref=e51]:
+        - text: rect
+        - generic [ref=e52]:
+          - status [ref=e53]: "-"
+          - text: ","
+          - status [ref=e54]: "-"
+          - text: "-"
+          - status [ref=e55]: "-"
+          - text: ","
+          - status [ref=e56]: "-"
+        - text: size
+        - generic [ref=e57]:
+          - status [ref=e58]: "0"
+          - text: x
+          - status [ref=e59]: "0"
+      - generic [ref=e61]:
+        - slider "scale=" [ref=e62]: "0"
+        - text: scale=
+        - status [ref=e63]: "1"
+        - text: x
+      - generic [ref=e64]:
+        - text: "Rendering:"
+        - radio "RGB" [checked] [ref=e65]
+        - text: RGB
+        - radio "NTSC" [ref=e66]
+        - text: NTSC
+        - radio "Mono" [ref=e67]
+        - text: Mono
+      - generic [ref=e68]:
+        - text: Pattern
+        - button [ref=e69]
+      - generic [ref=e72]: Scroll me
+    - generic [ref=e73]:
+      - generic [ref=e74]: Tools
+      - button " Pan" [ref=e75]:
+        - generic [ref=e76]: 
+        - text: Pan
+      - button " Select" [ref=e77]:
+        - generic [ref=e78]: 
+        - text: Select
+      - button " Scribble" [ref=e79]:
+        - generic [ref=e80]: 
+        - text: Scribble
+      - button " Line" [ref=e81]:
+        - generic [ref=e82]: 
+        - text: Line
+      - button " Rect Frame" [ref=e83]:
+        - generic [ref=e84]: 
+        - text: Rect Frame
+      - button " Rect" [ref=e85]:
+        - generic [ref=e86]: 
+        - text: Rect
+      - button " Ellipse Frame" [ref=e87]:
+        - generic [ref=e88]: 
+        - text: Ellipse Frame
+      - button " Ellipse" [ref=e89]:
+        - generic [ref=e90]: 
+        - text: Ellipse
+      - button " Text" [ref=e91]:
+        - generic [ref=e92]: 
+        - text: Text
+      - button " Fill" [ref=e93]:
+        - generic [ref=e94]: 
+        - text: Fill
+      - generic [ref=e95]: Configuration
+      - button " Choose Color" [ref=e96]:
+        - generic [ref=e97]: 
+        - text: Choose Color
+      - button " Choose Font" [ref=e98]:
+        - generic [ref=e99]: 
+        - text: Choose Font
+      - button " Line Width" [ref=e100]:
+        - generic [ref=e101]: 
+        - text: Line Width
+      - button " Settings" [ref=e102]:
+        - generic [ref=e103]: 
+        - text: Settings
+      - button "? About" [ref=e104]:
+        - generic [ref=e105]: "?"
+        - text: About
+    - generic [ref=e107]: Edit me
+  - generic [ref=e108]: Hello, world!
+```

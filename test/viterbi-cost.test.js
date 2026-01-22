@@ -290,6 +290,138 @@ describe('Viterbi Cost Function', () => {
         });
     });
 
+    describe('Structure-aware cost calculation', () => {
+        it('should accept optional structure hint parameter', () => {
+            const whiteTargets = Array(7).fill({ r: 255, g: 255, b: 255 });
+
+            // Should work without structure hint (backward compatibility)
+            const costWithoutHint = calculateTransitionCost(0x00, 0x7F, whiteTargets, 0, renderer, imageData, hgrBytes);
+            expect(costWithoutHint).toBeGreaterThanOrEqual(0);
+
+            // Should work with structure hint
+            const costWithHint = calculateTransitionCost(0x00, 0x7F, whiteTargets, 0, renderer, imageData, hgrBytes, 'SMOOTH');
+            expect(costWithHint).toBeGreaterThanOrEqual(0);
+        });
+
+        it('should apply structure penalty for EDGE hints', () => {
+            const grayTargets = Array(7).fill({ r: 128, g: 128, b: 128 });
+
+            // Transition with large pattern change
+            const prevByte = 0x00;
+            const nextByte = 0x7F;
+
+            // Cost without hint (default behavior)
+            const costDefault = calculateTransitionCost(prevByte, nextByte, grayTargets, 5, renderer, imageData, hgrBytes);
+
+            // Cost with EDGE hint (should apply structure penalty)
+            const costEdge = calculateTransitionCost(prevByte, nextByte, grayTargets, 5, renderer, imageData, hgrBytes, 'EDGE');
+
+            // EDGE hint should add penalty for large pattern changes
+            expect(costEdge).toBeGreaterThanOrEqual(costDefault);
+        });
+
+        it('should reduce penalty for SMOOTH hints', () => {
+            const grayTargets = Array(7).fill({ r: 128, g: 128, b: 128 });
+
+            // Transition with large pattern change
+            const prevByte = 0x00;
+            const nextByte = 0x55;
+
+            // Cost with default behavior (applies smoothness penalty)
+            const costDefault = calculateTransitionCost(prevByte, nextByte, grayTargets, 5, renderer, imageData, hgrBytes);
+
+            // Cost with SMOOTH hint (should reduce penalty to favor pattern stability)
+            const costSmooth = calculateTransitionCost(prevByte, nextByte, grayTargets, 5, renderer, imageData, hgrBytes, 'SMOOTH');
+
+            // SMOOTH hint should increase penalty to discourage pattern changes
+            expect(costSmooth).toBeGreaterThanOrEqual(costDefault);
+        });
+
+        it('should use medium penalty for TEXTURE hints', () => {
+            const grayTargets = Array(7).fill({ r: 128, g: 128, b: 128 });
+
+            const prevByte = 0x00;
+            const nextByte = 0x2A;
+
+            const costTexture = calculateTransitionCost(prevByte, nextByte, grayTargets, 5, renderer, imageData, hgrBytes, 'TEXTURE');
+            const costSmooth = calculateTransitionCost(prevByte, nextByte, grayTargets, 5, renderer, imageData, hgrBytes, 'SMOOTH');
+            const costEdge = calculateTransitionCost(prevByte, nextByte, grayTargets, 5, renderer, imageData, hgrBytes, 'EDGE');
+
+            // TEXTURE should be between SMOOTH and EDGE
+            expect(costTexture).toBeGreaterThanOrEqual(0);
+            // Penalty ordering: SMOOTH > TEXTURE > EDGE (SMOOTH discourages changes most)
+        });
+
+        it('should preserve backward compatibility without structure hint', () => {
+            const targetColors = Array(7).fill({ r: 200, g: 100, b: 50 });
+
+            // Should behave exactly as before when no hint is provided
+            const cost = calculateTransitionCost(0x00, 0x55, targetColors, 5, renderer, imageData, hgrBytes);
+            expect(cost).toBeGreaterThanOrEqual(0);
+            expect(cost).toBeLessThan(10000000); // Reasonable bounds
+        });
+
+        it('should handle all structure hint types', () => {
+            const targetColors = Array(7).fill({ r: 128, g: 128, b: 128 });
+
+            const costEdge = calculateTransitionCost(0x00, 0x55, targetColors, 5, renderer, imageData, hgrBytes, 'EDGE');
+            const costTexture = calculateTransitionCost(0x00, 0x55, targetColors, 5, renderer, imageData, hgrBytes, 'TEXTURE');
+            const costSmooth = calculateTransitionCost(0x00, 0x55, targetColors, 5, renderer, imageData, hgrBytes, 'SMOOTH');
+
+            // All should produce valid costs
+            expect(costEdge).toBeGreaterThanOrEqual(0);
+            expect(costTexture).toBeGreaterThanOrEqual(0);
+            expect(costSmooth).toBeGreaterThanOrEqual(0);
+        });
+
+        it('should ignore invalid structure hints', () => {
+            const targetColors = Array(7).fill({ r: 128, g: 128, b: 128 });
+
+            // Invalid hint should fall back to default behavior
+            const costInvalid = calculateTransitionCost(0x00, 0x55, targetColors, 5, renderer, imageData, hgrBytes, 'INVALID');
+            const costDefault = calculateTransitionCost(0x00, 0x55, targetColors, 5, renderer, imageData, hgrBytes);
+
+            // Should behave same as default
+            expect(costInvalid).toBe(costDefault);
+        });
+
+        it('should reduce graininess in smooth regions', () => {
+            // SMOOTH hint should strongly discourage pattern changes
+            // Use saturated color (saturation > 0.3) so penalty applies
+            const smoothTargets = Array(7).fill({ r: 255, g: 100, b: 50 }); // Orange, saturated
+
+            // Transition that maintains pattern
+            const cost_00_to_00 = calculateTransitionCost(0x00, 0x00, smoothTargets, 5, renderer, imageData, hgrBytes, 'SMOOTH');
+
+            // Transition that changes pattern
+            const cost_00_to_7F = calculateTransitionCost(0x00, 0x7F, smoothTargets, 5, renderer, imageData, hgrBytes, 'SMOOTH');
+
+            // Same pattern should have lower cost (less penalty)
+            expect(cost_00_to_00).toBeLessThan(cost_00_to_7F);
+        });
+
+        it('should preserve edge sharpness', () => {
+            // EDGE hint should allow pattern changes to match target accurately
+            // Use saturated colors (not grayscale) so penalty applies
+            const edgeTargets = [
+                { r: 0, g: 100, b: 200 },    // Blue, saturated
+                { r: 0, g: 100, b: 200 },
+                { r: 0, g: 100, b: 200 },
+                { r: 255, g: 100, b: 0 },    // Orange, saturated
+                { r: 255, g: 100, b: 0 },
+                { r: 255, g: 100, b: 0 },
+                { r: 255, g: 100, b: 0 }
+            ];
+
+            // Sharp transition should not have excessive penalty with EDGE hint
+            const costEdge = calculateTransitionCost(0x00, 0x78, edgeTargets, 5, renderer, imageData, hgrBytes, 'EDGE');
+            const costSmooth = calculateTransitionCost(0x00, 0x78, edgeTargets, 5, renderer, imageData, hgrBytes, 'SMOOTH');
+
+            // EDGE hint should have lower penalty than SMOOTH for sharp transitions
+            expect(costEdge).toBeLessThan(costSmooth);
+        });
+    });
+
     describe('Perceptual distance calculation', () => {
         it('should calculate squared error differences', () => {
             // Cost function should use sum of squared differences

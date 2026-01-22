@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Error Diffusion Byte Boundary Debug</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #222;
+            color: #0f0;
+        }
+        canvas {
+            border: 2px solid #0f0;
+            image-rendering: pixelated;
+            margin: 10px 0;
+        }
+        pre {
+            background: #111;
+            padding: 10px;
+            border: 1px solid #0f0;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .error { color: #f00; }
+        .ok { color: #0f0; }
+        .warning { color: #ff0; }
+    </style>
+</head>
+<body>
+    <h1>Error Diffusion Byte Boundary Debug</h1>
+    <p>Testing gray #888 horizontal line to diagnose blue/orange alternation failure at byte boundary.</p>
+
+    <h2>Test Canvas (Gray #888 horizontal line)</h2>
+    <canvas id="testCanvas" width="280" height="1"></canvas>
+
+    <h2>Debug Output</h2>
+    <pre id="output"></pre>
+
+    <script type="module">
+        import { greedyDitherScanline } from './docs/src/lib/greedy-dither.js';
+        import NTSCRenderer from './docs/src/lib/ntsc-renderer.js';
+
+        const canvas = document.getElementById('testCanvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const output = document.getElementById('output');
+
+        function log(msg, type = 'ok') {
+            const line = document.createElement('div');
+            line.className = type;
+            line.textContent = msg;
+            output.appendChild(line);
+        }
+
+        // Create gray #888 test image
+        ctx.fillStyle = '#888888';
+        ctx.fillRect(0, 0, 280, 1);
+
+        const imageData = ctx.getImageData(0, 0, 280, 1);
+        log(`Created test image: ${imageData.width}x${imageData.height}`, 'ok');
+        log(`Pixel data length: ${imageData.data.length} (should be ${280*1*4})`, 'ok');
+
+        // Verify source color
+        const sourceR = imageData.data[0];
+        const sourceG = imageData.data[1];
+        const sourceB = imageData.data[2];
+        log(`Source color: rgb(${sourceR}, ${sourceG}, ${sourceB})`, 'ok');
+
+        // Prepare for dithering
+        const errorBuffer = [];
+        const renderer = new NTSCRenderer();
+        const renderBuffer = new ImageData(560, 1);
+        const hgrBytes = new Uint8Array(40);
+
+        log('\n=== STARTING DITHER ===\n', 'warning');
+
+        // Instrument the greedy dither to add byte boundary logging
+        // We'll capture console.log output
+        const originalLog = console.log;
+        console.log = function(...args) {
+            log(args.join(' '), 'ok');
+            originalLog.apply(console, args);
+        };
+
+        // Run dithering
+        const scanline = greedyDitherScanline(
+            imageData.data,
+            errorBuffer,
+            0,
+            40,
+            280,
+            1,
+            renderer,
+            renderBuffer,
+            hgrBytes
+        );
+
+        console.log = originalLog;
+
+        log('\n=== DITHER COMPLETE ===\n', 'warning');
+
+        // Analyze results
+        log(`\n=== BYTE BOUNDARY ANALYSIS ===`, 'warning');
+        log(`Byte 0: 0x${scanline[0].toString(16).padStart(2, '0')}`, 'ok');
+        log(`Byte 1: 0x${scanline[1].toString(16).padStart(2, '0')}`, 'ok');
+        log(`Byte 2: 0x${scanline[2].toString(16).padStart(2, '0')}`, 'ok');
+
+        // Render the result to see what we got
+        for (let i = 0; i < renderBuffer.data.length; i++) {
+            renderBuffer.data[i] = 0;
+        }
+        renderer.renderHgrScanline(renderBuffer, scanline, 0, 0);
+
+        // Extract pixel colors at the byte boundary
+        log(`\n=== RENDERED PIXEL COLORS ===`, 'warning');
+        for (let px = 0; px < 16; px++) {
+            const ntscX = px * 2;
+            const idx = ntscX * 4;
+            const r = renderBuffer.data[idx];
+            const g = renderBuffer.data[idx + 1];
+            const b = renderBuffer.data[idx + 2];
+
+            const byteNum = Math.floor(px / 7);
+            const bitNum = px % 7;
+            const type = (r > 128 && g < 100 && b > 128) ? 'PURPLE' :
+                        (r < 100 && g > 100 && b > 128) ? 'BLUE' :
+                        (r > 200 && g > 100 && b < 100) ? 'ORANGE' :
+                        'OTHER';
+
+            const marker = (px === 7 || px === 8) ? ' <<<' : '';
+            log(`Pixel ${px.toString().padStart(2)} (byte ${byteNum} bit ${bitNum}): rgb(${r.toString().padStart(3)}, ${g.toString().padStart(3)}, ${b.toString().padStart(3)}) - ${type}${marker}`,
+                type === 'OTHER' ? 'warning' : 'ok');
+        }
+
+        // Check for the reported bug: blue/blue at pixels 8-9
+        const px8_ntscX = 8 * 2;
+        const px8_idx = px8_ntscX * 4;
+        const px8_color = {
+            r: renderBuffer.data[px8_idx],
+            g: renderBuffer.data[px8_idx + 1],
+            b: renderBuffer.data[px8_idx + 2]
+        };
+
+        const px9_ntscX = 9 * 2;
+        const px9_idx = px9_ntscX * 4;
+        const px9_color = {
+            r: renderBuffer.data[px9_idx],
+            g: renderBuffer.data[px9_idx + 1],
+            b: renderBuffer.data[px9_idx + 2]
+        };
+
+        const isBlue = (c) => c.r < 100 && c.g > 100 && c.b > 128;
+
+        log(`\n=== BUG CHECK ===`, 'warning');
+        if (isBlue(px8_color) && isBlue(px9_color)) {
+            log(`FOUND BUG: Pixels 8 and 9 are both blue (should alternate)`, 'error');
+        } else {
+            log(`No bug detected at pixels 8-9`, 'ok');
+        }
+
+        // Check error buffer state
+        log(`\n=== ERROR BUFFER STATE ===`, 'warning');
+        for (let px = 5; px < 12; px++) {
+            const err = errorBuffer[px];
+            if (err) {
+                log(`Pixel ${px.toString().padStart(2)}: error = rgb(${Math.round(err.r).toString().padStart(4)}, ${Math.round(err.g).toString().padStart(4)}, ${Math.round(err.b).toString().padStart(4)})`, 'ok');
+            } else {
+                log(`Pixel ${px.toString().padStart(2)}: no error accumulated`, 'ok');
+            }
+        }
+    </script>
+</body>
+</html>

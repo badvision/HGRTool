@@ -194,18 +194,39 @@ function propagateError(errorBuffer, byteX, y, target, rendered, pixelWidth, hei
             const nx = pixelX + dx;
             const ny = y + dy;
 
+            // CRITICAL FIX: Do not diffuse error RIGHTWARD across byte boundaries
+            // NTSC artifact rendering already handles color bleed between bytes.
+            // Diffusing error rightward would double-count this effect:
+            // - The error from last pixel of byte N is calculated with byte N-1 context
+            // - When byte N+1 renders, it uses byte N as context (different context!)
+            // - NTSC renderer already compensates via color bleed
+            // - Adding diffused error on top would be double-correction
+            //
+            // We still diffuse error DOWNWARD at byte boundaries because vertical
+            // scanlines are independent (no NTSC bleed between scanlines).
+            const isCrossingByteRight = (dy === 0 && dx > 0 && (pixelX % 7 === 6));
+
+            if (isCrossingByteRight) {
+                // Skip rightward diffusion at byte boundary
+                continue;
+            }
+
             if (ny >= 0 && ny < height && nx >= 0 && nx < pixelWidth) {
                 const idx = ny * pixelWidth + nx;
                 if (!errorBuffer[idx]) {
                     errorBuffer[idx] = { r: 0, g: 0, b: 0 };
                 }
 
-                errorBuffer[idx].r += error.r * weight;
-                errorBuffer[idx].g += error.g * weight;
-                errorBuffer[idx].b += error.b * weight;
+                // CRITICAL FIX: Clamp error buffer on WRITE to prevent overflow
+                // Without this, errors can accumulate to extreme values (+5000, -3000, etc.)
+                // which then get clamped on read, losing important information
+                errorBuffer[idx].r = Math.max(-255, Math.min(255, errorBuffer[idx].r + error.r * weight));
+                errorBuffer[idx].g = Math.max(-255, Math.min(255, errorBuffer[idx].g + error.g * weight));
+                errorBuffer[idx].b = Math.max(-255, Math.min(255, errorBuffer[idx].b + error.b * weight));
             }
         }
     }
+
 }
 
 /**

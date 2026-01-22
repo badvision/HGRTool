@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Structure-Aware Test</title>
+</head>
+<body>
+    <h1>Structure-Aware Algorithm Test</h1>
+    <input type="file" id="fileInput" accept="image/*">
+    <br><br>
+    <canvas id="canvas" width="280" height="192"></canvas>
+    <br>
+    <div id="status">Select an image file to test structure-aware dithering...</div>
+    <br>
+    <div id="progress"></div>
+    <br>
+    <div id="error" style="color: red;"></div>
+
+    <script type="module">
+        import ImageDither from './docs/lib/image-dither.js';
+
+        const fileInput = document.getElementById('fileInput');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const progressDiv = document.getElementById('progress');
+        const errorDiv = document.getElementById('error');
+
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            statusDiv.textContent = 'Loading image...';
+            errorDiv.textContent = '';
+            progressDiv.textContent = '';
+
+            const img = new Image();
+            img.onload = async () => {
+                try {
+                    statusDiv.textContent = 'Processing with structure-aware algorithm...';
+
+                    const ditherer = new ImageDither();
+
+                    const hgrData = await ditherer.ditherToHgrAsync(
+                        img,
+                        40,  // targetWidth in bytes
+                        192, // targetHeight
+                        "structure-aware",
+                        (completed, total) => {
+                            const percent = Math.floor((completed / total) * 100);
+                            progressDiv.textContent = `Progress: ${percent}%`;
+                        }
+                    );
+
+                    statusDiv.textContent = 'Rendering result...';
+
+                    // Simple rendering - just show the bytes as grayscale
+                    const imageData = ctx.createImageData(280, 192);
+                    for (let y = 0; y < 192; y++) {
+                        for (let x = 0; x < 40; x++) {
+                            const byte = hgrData[y * 40 + x];
+                            for (let bit = 0; bit < 7; bit++) {
+                                const px = x * 7 + bit;
+                                const val = (byte & (1 << bit)) ? 255 : 0;
+                                const idx = (y * 280 + px) * 4;
+                                imageData.data[idx] = val;
+                                imageData.data[idx + 1] = val;
+                                imageData.data[idx + 2] = val;
+                                imageData.data[idx + 3] = 255;
+                            }
+                        }
+                    }
+                    ctx.putImageData(imageData, 0, 0);
+
+                    statusDiv.textContent = 'Complete!';
+                    progressDiv.textContent = '';
+
+                    console.log('HGR data sample (first 20 bytes):', Array.from(hgrData.slice(0, 20)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(', '));
+
+                } catch (err) {
+                    errorDiv.textContent = 'ERROR: ' + err.message;
+                    console.error('Dithering error:', err);
+                    console.error('Stack:', err.stack);
+                }
+            };
+
+            img.onerror = () => {
+                errorDiv.textContent = 'Failed to load image';
+            };
+
+            img.src = URL.createObjectURL(file);
+        });
+
+        // Global error handler
+        window.addEventListener('error', (e) => {
+            errorDiv.textContent = 'SCRIPT ERROR: ' + e.message;
+            console.error('Window error:', e);
+        });
+    </script>
+</body>
+</html>

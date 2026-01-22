@@ -1,0 +1,264 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - button " New" [ref=e4]:
+        - generic [ref=e5]: 
+        - text: New
+      - button " Open" [ref=e6]:
+        - generic [ref=e7]: 
+        - text: Open
+      - button " Import" [ref=e8]:
+        - generic [ref=e9]: 
+        - text: Import
+      - button " Save" [ref=e10]:
+        - generic [ref=e11]: 
+        - text: Save
+      - button " Save As" [ref=e12]:
+        - generic [ref=e13]: 
+        - text: Save As
+      - button " Close" [ref=e14]:
+        - generic [ref=e15]: 
+        - text: Close
+      - button " Cut" [ref=e17]:
+        - generic [ref=e18]: 
+        - text: Cut
+      - button " Copy" [ref=e19]:
+        - generic [ref=e20]: 
+        - text: Copy
+      - button " Paste" [ref=e21]:
+        - generic [ref=e22]: 
+        - text: Paste
+      - button " Undo" [ref=e23]:
+        - generic [ref=e24]: 
+        - text: Undo
+      - button " Redo" [ref=e25]:
+        - generic [ref=e26]: 
+        - text: Redo
+    - generic [ref=e27]:
+      - generic [ref=e28]: Images
+      - button [ref=e29]
+      - button [ref=e31]
+      - button [ref=e33]
+      - button [ref=e35]
+      - button [ref=e37]
+      - button [ref=e39]
+      - button [ref=e41]
+      - button [ref=e43]
+    - generic [ref=e45]:
+      - generic [ref=e46]:
+        - text: cursor
+        - generic [ref=e47]:
+          - status [ref=e48]: "-"
+          - text: ","
+          - status [ref=e49]: "-"
+      - generic [ref=e50]:
+        - text: rect
+        - generic [ref=e51]:
+          - status [ref=e52]: "-"
+          - text: ","
+          - status [ref=e53]: "-"
+          - text: "-"
+          - status [ref=e54]: "-"
+          - text: ","
+          - status [ref=e55]: "-"
+        - text: size
+        - generic [ref=e56]:
+          - status [ref=e57]: "0"
+          - text: x
+          - status [ref=e58]: "0"
+      - generic [ref=e60]:
+        - slider "scale=" [ref=e61]: "1"
+        - text: scale=
+        - status [ref=e62]: "2"
+        - text: x
+      - generic [ref=e63]:
+        - text: "Rendering:"
+        - radio "RGB" [ref=e64]
+        - text: RGB
+        - radio "NTSC" [checked] [ref=e65]
+        - text: NTSC
+        - radio "Mono" [ref=e66]
+        - text: Mono
+      - generic [ref=e67]:
+        - text: Pattern
+        - button [ref=e68]
+      - generic [ref=e71]: Scroll me
+    - generic [ref=e72]:
+      - generic [ref=e73]: Tools
+      - button " Pan" [ref=e74]:
+        - generic [ref=e75]: 
+        - text: Pan
+      - button " Select" [ref=e76]:
+        - generic [ref=e77]: 
+        - text: Select
+      - button " Scribble" [ref=e78]:
+        - generic [ref=e79]: 
+        - text: Scribble
+      - button " Line" [ref=e80]:
+        - generic [ref=e81]: 
+        - text: Line
+      - button " Rect Frame" [ref=e82]:
+        - generic [ref=e83]: 
+        - text: Rect Frame
+      - button " Rect" [ref=e84]:
+        - generic [ref=e85]: 
+        - text: Rect
+      - button " Ellipse Frame" [ref=e86]:
+        - generic [ref=e87]: 
+        - text: Ellipse Frame
+      - button " Ellipse" [ref=e88]:
+        - generic [ref=e89]: 
+        - text: Ellipse
+      - button " Text" [ref=e90]:
+        - generic [ref=e91]: 
+        - text: Text
+      - button " Fill" [ref=e92]:
+        - generic [ref=e93]: 
+        - text: Fill
+      - generic [ref=e94]: Configuration
+      - button " Choose Color" [ref=e95]:
+        - generic [ref=e96]: 
+        - text: Choose Color
+      - button " Choose Font" [ref=e97]:
+        - generic [ref=e98]: 
+        - text: Choose Font
+      - button " Line Width" [ref=e99]:
+        - generic [ref=e100]: 
+        - text: Line Width
+      - button " Settings" [ref=e101]:
+        - generic [ref=e102]: 
+        - text: Settings
+      - button "? About" [ref=e103]:
+        - generic [ref=e104]: "?"
+        - text: About
+    - generic [ref=e106]: Edit me
+  - dialog [ref=e107]:
+    - generic [ref=e108]:
+      - generic [ref=e109]: Solid Colors
+      - generic [ref=e110]: Dither Patterns
+      - generic [ref=e111]:
+        - button [active] [ref=e112]
+        - button [ref=e114]
+        - button [ref=e116]
+        - button [ref=e118]
+        - button [ref=e120]
+        - button [ref=e122]
+        - button [ref=e124]
+        - button [ref=e126]
+        - button [ref=e128]
+        - button [ref=e130]
+      - generic [ref=e132]:
+        - button [ref=e133]
+        - button [ref=e135]
+        - button [ref=e137]
+        - button [ref=e139]
+        - button [ref=e141]
+        - button [ref=e143]
+        - button [ref=e145]
+        - button [ref=e147]
+        - button [ref=e149]
+        - button [ref=e151]
+        - button [ref=e153]
+        - button [ref=e155]
+        - button [ref=e157]
+        - button [ref=e159]
+        - button [ref=e161]
+        - button [ref=e163]
+        - button [ref=e165]
+        - button [ref=e167]
+        - button [ref=e169]
+        - button [ref=e171]
+        - button [ref=e173]
+        - button [ref=e175]
+        - button [ref=e177]
+        - button [ref=e179]
+        - button [ref=e181]
+        - button [ref=e183]
+        - button [ref=e185]
+        - button [ref=e187]
+        - button [ref=e189]
+        - button [ref=e191]
+        - button [ref=e193]
+        - button [ref=e195]
+        - button [ref=e197]
+        - button [ref=e199]
+        - button [ref=e201]
+        - button [ref=e203]
+        - button [ref=e205]
+        - button [ref=e207]
+        - button [ref=e209]
+        - button [ref=e211]
+        - button [ref=e213]
+        - button [ref=e215]
+        - button [ref=e217]
+        - button [ref=e219]
+        - button [ref=e221]
+        - button [ref=e223]
+        - button [ref=e225]
+        - button [ref=e227]
+        - button [ref=e229]
+        - button [ref=e231]
+        - button [ref=e233]
+        - button [ref=e235]
+        - button [ref=e237]
+        - button [ref=e239]
+        - button [ref=e241]
+        - button [ref=e243]
+        - button [ref=e245]
+        - button [ref=e247]
+        - button [ref=e249]
+        - button [ref=e251]
+        - button [ref=e253]
+        - button [ref=e255]
+        - button [ref=e257]
+        - button [ref=e259]
+        - button [ref=e261]
+        - button [ref=e263]
+        - button [ref=e265]
+        - button [ref=e267]
+        - button [ref=e269]
+        - button [ref=e271]
+        - button [ref=e273]
+        - button [ref=e275]
+        - button [ref=e277]
+        - button [ref=e279]
+        - button [ref=e281]
+        - button [ref=e283]
+        - button [ref=e285]
+        - button [ref=e287]
+        - button [ref=e289]
+        - button [ref=e291]
+        - button [ref=e293]
+        - button [ref=e295]
+        - button [ref=e297]
+        - button [ref=e299]
+        - button [ref=e301]
+        - button [ref=e303]
+        - button [ref=e305]
+        - button [ref=e307]
+        - button [ref=e309]
+        - button [ref=e311]
+        - button [ref=e313]
+        - button [ref=e315]
+        - button [ref=e317]
+        - button [ref=e319]
+        - button [ref=e321]
+        - button [ref=e323]
+        - button [ref=e325]
+        - button [ref=e327]
+        - button [ref=e329]
+        - button [ref=e331]
+        - button [ref=e333]
+        - button [ref=e335]
+        - button [ref=e337]
+        - button [ref=e339]
+        - button [ref=e341]
+        - button [ref=e343]
+        - button [ref=e345]
+        - button [ref=e347]
+      - button "Close" [ref=e349]
+  - generic [ref=e350]: Hello, world!
+```

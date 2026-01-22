@@ -41,7 +41,7 @@ import NTSCRenderer from './ntsc-renderer.js';
  * - Reduce color banding: Orange 260→185 (29% reduction), Blue 235→114 (51% reduction)
  * - Preserve B&W fidelity: White PSNR remains >25 dB
  */
-const SMOOTHNESS_WEIGHT = 70000.0;
+const SMOOTHNESS_WEIGHT = 0.0; // DISABLED - was causing beam search to prune good paths
 
 /**
  * Structure-aware penalty weights.
@@ -52,9 +52,9 @@ const SMOOTHNESS_WEIGHT = 70000.0;
  * - EDGE regions: Low penalty (allow pattern changes for sharp edges)
  */
 const STRUCTURE_PENALTY_MULTIPLIER = {
-    SMOOTH: 1.5,   // 50% more penalty in smooth regions
+    SMOOTH: 1.05,  // 5% more penalty in smooth regions (was 1.5 - too aggressive)
     TEXTURE: 1.0,  // Default penalty in textured regions
-    EDGE: 0.5      // 50% less penalty at edges
+    EDGE: 0.8      // 20% less penalty at edges (was 0.5 - too permissive)
 };
 
 /**

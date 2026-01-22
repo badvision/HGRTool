@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Visual Quality Report</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .summary {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        .summary-stat {
+            display: inline-block;
+            margin-right: 40px;
+            font-size: 18px;
+        }
+        .summary-stat .label {
+            color: #666;
+            font-weight: bold;
+        }
+        .summary-stat .value {
+            color: #4CAF50;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .test-result {
+            background: white;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-result h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .metrics {
+            margin: 15px 0;
+        }
+        .metric {
+            display: inline-block;
+            margin-right: 30px;
+            padding: 10px 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .metric .label {
+            color: #666;
+            font-size: 14px;
+        }
+        .metric .value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+        .quality-good { color: #4CAF50; }
+        .quality-acceptable { color: #FF9800; }
+        .quality-poor { color: #F44336; }
+        .images {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .image-container {
+            text-align: center;
+        }
+        .image-container img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .image-container .caption {
+            margin-top: 5px;
+            font-size: 14px;
+            color: #666;
+        }
+        .timestamp {
+            color: #999;
+            font-size: 12px;
+            text-align: right;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Visual Quality Report</h1>
+
+    <div class="summary">
+        <h2>Summary Statistics</h2>
+        <div class="summary-stat">
+            <div class="label">Average PSNR:</div>
+            <div class="value">12.22 dB</div>
+        </div>
+        <div class="summary-stat">
+            <div class="label">Average SSIM:</div>
+            <div class="value">0.483</div>
+        </div>
+        <div class="summary-stat">
+            <div class="label">Tests Run:</div>
+            <div class="value">14</div>
+        </div>
+    </div>
+
+    <h2>Individual Test Results</h2>
+
+
+    <div class="test-result">
+        <h3>solid-red</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-poor">3.59 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-poor">0.007</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="solid-red-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-red-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-red-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>solid-green</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-poor">3.63 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-poor">0.009</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="solid-green-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-green-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-green-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>solid-blue</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-poor">4.86 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-poor">0.016</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="solid-blue-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-blue-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-blue-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>solid-white</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-acceptable">26.93 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-good">0.973</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="solid-white-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-white-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-white-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>solid-black</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-good">∞ (perfect)</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-good">1.000</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="solid-black-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-black-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-black-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>solid-gray</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-poor">7.45 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-poor">0.014</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="solid-gray-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-gray-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="solid-gray-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>gradient-horizontal</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-poor">9.38 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-poor">0.085</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="gradient-horizontal-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="gradient-horizontal-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="gradient-horizontal-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>gradient-vertical</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-poor">9.41 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-poor">0.101</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="gradient-vertical-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="gradient-vertical-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="gradient-vertical-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>gradient-radial</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-poor">8.33 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-poor">0.034</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="gradient-radial-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="gradient-radial-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="gradient-radial-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>checkerboard-10px</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-poor">11.84 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-acceptable">0.792</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="checkerboard-10px-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="checkerboard-10px-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="checkerboard-10px-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>stripes-vertical</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-poor">12.36 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-good">0.854</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="stripes-vertical-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="stripes-vertical-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="stripes-vertical-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>stripes-horizontal</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-good">30.12 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-good">0.995</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="stripes-horizontal-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="stripes-horizontal-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="stripes-horizontal-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>line-art-circle</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-acceptable">21.36 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-good">0.956</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="line-art-circle-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="line-art-circle-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="line-art-circle-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-result">
+        <h3>line-art-rectangle</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-acceptable">21.87 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-good">0.926</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="line-art-rectangle-source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="line-art-rectangle-converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="line-art-rectangle-diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+
+    <div class="timestamp">
+        Generated: 2026-01-21T18:37:42.048Z
+    </div>
+</body>
+</html>

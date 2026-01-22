@@ -92,9 +92,18 @@ function getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth) {
 }
 
 /**
- * Calculates error for a candidate byte using actual NTSC rendering.
- * This is simplified Viterbi - we just test all 256 byte values considering
- * the previous byte's context through NTSC rendering.
+ * Calculates error for a candidate byte using realistic self-repeating fill.
+ *
+ * CRITICAL INSIGHT: When testing a candidate byte at position X, we render it with
+ * context from bytes 0 to X-1. But NTSC sliding window means this byte affects
+ * byte X+1's rendering AND byte X+1 affects this byte's rendering (bidirectional
+ * dependency). We don't know what byte X+1 will be yet, so we use a REALISTIC
+ * assumption: fill unknown bytes with the candidate byte itself (self-repeating).
+ *
+ * This is more realistic than 0x00/0xFF extremes because:
+ * - Solid color regions tend to have similar/repeated byte patterns
+ * - Self-repeating fill gives us a reasonable error estimate
+ * - Avoids the overly optimistic bias of min(0x00, 0xFF) scenarios
  *
  * @param {number} prevByte - Previous byte in scanline (or 0 if first)
  * @param {number} candidateByte - Byte value to test (0-255)
@@ -103,40 +112,41 @@ function getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth) {
  * @param {NTSCRenderer} renderer - NTSC renderer instance
  * @param {ImageData} imageData - Reusable ImageData buffer (560x1)
  * @param {Uint8Array} hgrBytes - Reusable HGR byte buffer (40 bytes)
+ * @param {Uint8Array} scanlineSoFar - Scanline being built with committed bytes
  * @returns {{totalError: number, renderedColors: Array<{r,g,b}>}} - Total error and rendered colors
  */
-function calculateByteErrorWithColors(prevByte, candidateByte, targetColors, byteX, renderer, imageData, hgrBytes) {
-    // Clear the HGR buffer
-    hgrBytes.fill(0);
-
-    // Place bytes at their ACTUAL positions to preserve correct NTSC phase alignment
-    // Previously we used testByteX = max(1, byteX) which shifted byte 0 to position 1,
-    // causing a 7-pixel phase offset (7 mod 4 = 3 phases wrong) that made the first
-    // bit select colors with incorrect phase.
-    if (byteX > 0) {
-        hgrBytes[byteX - 1] = prevByte;
+function calculateByteErrorWithColors(prevByte, candidateByte, targetColors, byteX, renderer, imageData, hgrBytes, scanlineSoFar) {
+    // Restore committed bytes (0 to byteX-1) for correct NTSC context
+    for (let i = 0; i < byteX; i++) {
+        hgrBytes[i] = scanlineSoFar[i];
     }
+
+    // Place candidate byte
     hgrBytes[byteX] = candidateByte;
+
+    // Fill unknown bytes (byteX+1 to 39) with CANDIDATE BYTE (realistic assumption)
+    // This is more realistic than 0x00/0xFF extremes because solid regions tend
+    // to have similar bytes, and this gives us a reasonable error estimate.
+    for (let i = byteX + 1; i < hgrBytes.length; i++) {
+        hgrBytes[i] = candidateByte;
+    }
 
     // Clear imageData
     for (let i = 0; i < imageData.data.length; i++) {
         imageData.data[i] = 0;
     }
 
-    // Render this scanline through NTSC
+    // Render through NTSC
     renderer.renderHgrScanline(imageData, hgrBytes, 0, 0);
 
-    // Extract rendered colors for the 7 pixels in this byte
+    // Calculate error for pixels in this byte
     const renderedColors = [];
     let totalError = 0;
 
     for (let bitPos = 0; bitPos < 7; bitPos++) {
-        // Use actual byteX, not testByteX - this ensures correct NTSC phase
-        // Byte 0 reads pixels 0-6, byte 1 reads pixels 7-13, etc.
-        // This preserves the phase relationship: byte 0 at phase 0, byte 1 at phase 3
         const pixelX = byteX * 7 + bitPos;
-        const ntscX = pixelX * 2; // HGR pixel to NTSC pixel
-        const idx = ntscX * 4; // RGBA index
+        const ntscX = pixelX * 2;
+        const idx = ntscX * 4;
 
         const rendered = {
             r: imageData.data[idx],
@@ -152,9 +162,14 @@ function calculateByteErrorWithColors(prevByte, candidateByte, targetColors, byt
 }
 
 /**
- * Finds the best byte using Viterbi-style exhaustive search.
- * Tests all 256 possible byte values considering the previous byte's context.
+ * Finds the best byte using Viterbi-style exhaustive search with smoothness penalty.
+ * Tests all 256 possible byte values considering the full scanline context.
  * Returns both the best byte and its rendered colors for error diffusion.
+ *
+ * SMOOTHNESS PENALTY: To prevent vertical stripes in solid color areas, we add a
+ * penalty for changing the byte pattern (lower 7 bits). This encourages pattern
+ * consistency while still allowing changes when needed for detail or color accuracy.
+ * The penalty is adaptive: stronger for uniform areas, weaker for detailed areas.
  *
  * @param {number} prevByte - Previous byte in scanline (or 0 if first)
  * @param {Array<{r: number, g: number, b: number}>} targetColors - Target colors for 7 pixels
@@ -162,17 +177,39 @@ function calculateByteErrorWithColors(prevByte, candidateByte, targetColors, byt
  * @param {NTSCRenderer} renderer - NTSC renderer instance
  * @param {ImageData} imageData - Reusable ImageData buffer (560x1)
  * @param {Uint8Array} hgrBytes - Reusable HGR byte buffer (40 bytes)
+ * @param {Uint8Array} scanlineSoFar - Scanline being built with committed bytes
  * @returns {{byte: number, renderedColors: Array<{r,g,b}>}} - Best byte and its rendered colors
  */
-function findBestByteViterbi(prevByte, targetColors, byteX, renderer, imageData, hgrBytes) {
+function findBestByteViterbi(prevByte, targetColors, byteX, renderer, imageData, hgrBytes, scanlineSoFar) {
     let bestByte = 0;
     let leastError = Infinity;
     let bestRenderedColors = null;
 
+    // Calculate target uniformity to adapt smoothness penalty
+    // High uniformity (low variance) means solid color area → strong smoothness penalty
+    // Low uniformity (high variance) means detailed area → weak smoothness penalty
+    let maxDiff = 0;
+    for (let i = 0; i < targetColors.length - 1; i++) {
+        const diff = Math.abs(targetColors[i].r - targetColors[i + 1].r) +
+                     Math.abs(targetColors[i].g - targetColors[i + 1].g) +
+                     Math.abs(targetColors[i].b - targetColors[i + 1].b);
+        maxDiff = Math.max(maxDiff, diff);
+    }
+    // Normalize to 0-1 range (0 = solid color, 1 = max contrast)
+    const detailLevel = Math.min(maxDiff / (3 * 255), 1.0);
+
+    // Smoothness penalty weight: strong for solid areas, weak for detailed areas
+    // Typical perceptual color error is 0-65025 (255^2 * 3 channels with weights)
+    // Base penalty of 20,000 is ~16% of typical byte error (enough to encourage
+    // consistency without forcing catastrophically wrong choices)
+    // For solid colors: We want pattern change to be moderately expensive (~20000)
+    // For detailed areas: We want pattern change to be cheap (~1000)
+    const smoothnessWeight = 20000 * (1.0 - detailLevel * 0.95);
+
     // Exhaustive search: test all 256 possible bytes
     // This is the key to handling the sliding window correctly - by testing
-    // all bytes with the previous byte as context, we naturally account for
-    // how the last bits of prevByte affect the rendering of this byte.
+    // all bytes with the full scanline context, we naturally account for
+    // how all previous bytes affect the rendering of this byte through NTSC phase.
     for (let byte = 0; byte < 256; byte++) {
         const { totalError, renderedColors } = calculateByteErrorWithColors(
             prevByte,
@@ -181,11 +218,22 @@ function findBestByteViterbi(prevByte, targetColors, byteX, renderer, imageData,
             byteX,
             renderer,
             imageData,
-            hgrBytes
+            hgrBytes,
+            scanlineSoFar
         );
 
-        if (totalError < leastError) {
-            leastError = totalError;
+        // Apply smoothness penalty if byte pattern changes (only after first byte)
+        let finalError = totalError;
+        if (byteX > 0) {
+            const prevPattern = prevByte & 0x7F;
+            const currPattern = byte & 0x7F;
+            if (prevPattern !== currPattern) {
+                finalError += smoothnessWeight;
+            }
+        }
+
+        if (finalError < leastError) {
+            leastError = finalError;
             bestByte = byte;
             bestRenderedColors = renderedColors;
         }
@@ -312,7 +360,7 @@ export function viterbiByteDither(pixels, errorBuffer, y, targetWidth, pixelWidt
         // Get target colors with accumulated error
         const targetColors = getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth);
 
-        // Find best byte using Viterbi (exhaustive search with previous byte context)
+        // Find best byte using Viterbi (exhaustive search with full scanline context)
         const prevByte = byteX > 0 ? scanline[byteX - 1] : 0;
         const { byte: bestByte, renderedColors } = findBestByteViterbi(
             prevByte,
@@ -320,7 +368,8 @@ export function viterbiByteDither(pixels, errorBuffer, y, targetWidth, pixelWidt
             byteX,
             renderer,
             imageData,
-            hgrBytes
+            hgrBytes,
+            scanline
         );
 
         // Commit best byte

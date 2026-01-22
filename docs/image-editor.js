@@ -717,7 +717,8 @@ class ImageEditor {
         };
 
         // Use async version to avoid blocking UI
-        const linearScreenData = await ditherer.ditherToHgrAsync(img, 40, 192, "two-pass", progressCallback);
+        // Hybrid algorithm: greedy byte-by-byte with error diffusion (working baseline)
+        const linearScreenData = await ditherer.ditherToHgrAsync(img, 40, 192, "hybrid", progressCallback);
 
         // Apple II HGR uses an interleaved scanline layout, not sequential
         // We need to convert from linear (row 0, row 1, row 2...) to interleaved format

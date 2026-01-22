@@ -16,25 +16,25 @@ describe('UI Integration', () => {
 
   describe('Import Button', () => {
     it('should exist in HTML', () => {
-      const btn = document.getElementById('btn-import-image');
+      const btn = document.getElementById('btn-import');
       expect(btn).toBeTruthy();
       expect(btn.tagName).toBe('BUTTON');
     });
 
     it('should have correct class', () => {
-      const btn = document.getElementById('btn-import-image');
+      const btn = document.getElementById('btn-import');
       expect(btn.classList.contains('icon-button')).toBe(true);
     });
 
     it('should have icon', () => {
-      const btn = document.getElementById('btn-import-image');
+      const btn = document.getElementById('btn-import');
       const icon = btn.querySelector('i');
       expect(icon).toBeTruthy();
       expect(icon.classList.contains('fa-image')).toBe(true);
     });
 
     it('should have text content', () => {
-      const btn = document.getElementById('btn-import-image');
+      const btn = document.getElementById('btn-import');
       expect(btn.textContent).toContain('Import');
     });
   });

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Visual Quality Report</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .summary {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        .summary-stat {
+            display: inline-block;
+            margin-right: 40px;
+            font-size: 18px;
+        }
+        .summary-stat .label {
+            color: #666;
+            font-weight: bold;
+        }
+        .summary-stat .value {
+            color: #4CAF50;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .test-result {
+            background: white;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-result h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .metrics {
+            margin: 15px 0;
+        }
+        .metric {
+            display: inline-block;
+            margin-right: 30px;
+            padding: 10px 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .metric .label {
+            color: #666;
+            font-size: 14px;
+        }
+        .metric .value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+        .quality-good { color: #4CAF50; }
+        .quality-acceptable { color: #FF9800; }
+        .quality-poor { color: #F44336; }
+        .images {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .image-container {
+            text-align: center;
+        }
+        .image-container img {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .image-container .caption {
+            margin-top: 5px;
+            font-size: 14px;
+            color: #666;
+        }
+        .timestamp {
+            color: #999;
+            font-size: 12px;
+            text-align: right;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Visual Quality Report</h1>
+
+    <div class="summary">
+        <h2>Summary Statistics</h2>
+        <div class="summary-stat">
+            <div class="label">Average PSNR:</div>
+            <div class="value">25.50 dB</div>
+        </div>
+        <div class="summary-stat">
+            <div class="label">Average SSIM:</div>
+            <div class="value">0.850</div>
+        </div>
+        <div class="summary-stat">
+            <div class="label">Tests Run:</div>
+            <div class="value">1</div>
+        </div>
+    </div>
+
+    <h2>Individual Test Results</h2>
+
+
+    <div class="test-result">
+        <h3>test-image</h3>
+        <div class="metrics">
+            <div class="metric">
+                <div class="label">PSNR</div>
+                <div class="value quality-acceptable">25.50 dB</div>
+            </div>
+            <div class="metric">
+                <div class="label">SSIM</div>
+                <div class="value quality-good">0.850</div>
+            </div>
+            <div class="metric">
+                <div class="label">Resolution</div>
+                <div class="value">280x192</div>
+            </div>
+        </div>
+        <div class="images">
+            <div class="image-container">
+                <img src="source.png" alt="Source">
+                <div class="caption">Source Image</div>
+            </div>
+            <div class="image-container">
+                <img src="converted.png" alt="Converted">
+                <div class="caption">HGR Converted (NTSC)</div>
+            </div>
+            <div class="image-container">
+                <img src="diff.png" alt="Difference">
+                <div class="caption">Difference Map</div>
+            </div>
+        </div>
+    </div>
+    
+
+    <div class="timestamp">
+        Generated: 2026-01-22T14:27:49.407Z
+    </div>
+</body>
+</html>

@@ -163,4 +163,19 @@ if (!global.OffscreenCanvas) {
   };
 }
 
+// Mock fetch for LegalStuff.txt
+if (!global.fetch) {
+  global.fetch = vi.fn((url) => {
+    // Return a mock response for LegalStuff.txt
+    if (url.includes('LegalStuff.txt')) {
+      return Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('Mock legal stuff content for testing'),
+      });
+    }
+    // Reject for other URLs to avoid hanging tests
+    return Promise.reject(new Error(`Unmocked fetch URL: ${url}`));
+  });
+}
+
 console.log('Test setup complete');

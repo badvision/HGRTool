@@ -141,4 +141,295 @@ describe('ImageDither', () => {
       expect(buffer[0][2]).toEqual([0, 0, 255]);
     });
   });
+
+  describe('hybrid dithering - RGB utilities', () => {
+    it('should unpack RGB values correctly', () => {
+      const packed = (255 << 16) | (128 << 8) | 64;
+      const rgb = dither.unpackRGB(packed);
+      expect(rgb.r).toBe(255);
+      expect(rgb.g).toBe(128);
+      expect(rgb.b).toBe(64);
+    });
+
+    it('should unpack black correctly', () => {
+      const packed = 0;
+      const rgb = dither.unpackRGB(packed);
+      expect(rgb.r).toBe(0);
+      expect(rgb.g).toBe(0);
+      expect(rgb.b).toBe(0);
+    });
+
+    it('should unpack white correctly', () => {
+      const packed = (255 << 16) | (255 << 8) | 255;
+      const rgb = dither.unpackRGB(packed);
+      expect(rgb.r).toBe(255);
+      expect(rgb.g).toBe(255);
+      expect(rgb.b).toBe(255);
+    });
+  });
+
+  describe('hybrid dithering - perceptual distance', () => {
+    it('should calculate distance between identical colors as 0', () => {
+      const distance = dither.perceptualDistance(
+        {r: 128, g: 128, b: 128},
+        {r: 128, g: 128, b: 128}
+      );
+      expect(distance).toBe(0);
+    });
+
+    it('should calculate distance between black and white', () => {
+      const distance = dither.perceptualDistance(
+        {r: 0, g: 0, b: 0},
+        {r: 255, g: 255, b: 255}
+      );
+      // Using weighted formula: sqrt(0.299*dr^2 + 0.587*dg^2 + 0.114*db^2)
+      const expected = Math.sqrt(0.299 * 255*255 + 0.587 * 255*255 + 0.114 * 255*255);
+      expect(distance).toBeCloseTo(expected);
+    });
+
+    it('should weight green more heavily', () => {
+      // Pure red difference
+      const distRed = dither.perceptualDistance(
+        {r: 0, g: 0, b: 0},
+        {r: 255, g: 0, b: 0}
+      );
+      // Pure green difference
+      const distGreen = dither.perceptualDistance(
+        {r: 0, g: 0, b: 0},
+        {r: 0, g: 255, b: 0}
+      );
+      // Green should be weighted more heavily (0.587 vs 0.299)
+      expect(distGreen).toBeGreaterThan(distRed);
+    });
+  });
+
+  describe('hybrid dithering - NTSC error calculation', () => {
+    it('should calculate error for a byte pattern', () => {
+      const targetColors = [
+        {r: 128, g: 128, b: 128},
+        {r: 128, g: 128, b: 128},
+        {r: 128, g: 128, b: 128},
+        {r: 128, g: 128, b: 128},
+        {r: 128, g: 128, b: 128},
+        {r: 128, g: 128, b: 128},
+        {r: 128, g: 128, b: 128}
+      ];
+
+      const error = dither.calculateNTSCError(0x00, 0x55, targetColors, 0);
+      expect(error).toBeGreaterThan(0);
+      expect(error).toBeLessThan(Infinity);
+    });
+
+    it('should have lower error for matching patterns', () => {
+      const blackTargets = Array(7).fill({r: 0, g: 0, b: 0});
+      const whiteTargets = Array(7).fill({r: 255, g: 255, b: 255});
+
+      const errorBlack = dither.calculateNTSCError(0x00, 0x00, blackTargets, 0);
+      const errorWhite = dither.calculateNTSCError(0x00, 0x00, whiteTargets, 0);
+
+      // Black pattern should match black targets better
+      expect(errorBlack).toBeLessThan(errorWhite);
+    });
+  });
+
+  describe('hybrid dithering - pattern selection', () => {
+    it('should select best byte pattern', () => {
+      const targetColors = Array(7).fill({r: 255, g: 255, b: 255});
+      const bestByte = dither.findBestBytePattern(0x00, targetColors, 0);
+
+      expect(bestByte).toBeGreaterThanOrEqual(0);
+      expect(bestByte).toBeLessThanOrEqual(255);
+    });
+
+    it('should have canonical patterns available', () => {
+      expect(dither.canonicalPatterns).toBeDefined();
+      expect(dither.canonicalPatterns.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('hybrid dithering - NTSC color rendering', () => {
+    it('should render colors for a byte', () => {
+      const colors = dither.renderNTSCColors(0x00, 0x55, 0);
+
+      expect(colors).toHaveLength(7);
+      colors.forEach(color => {
+        expect(color).toHaveProperty('r');
+        expect(color).toHaveProperty('g');
+        expect(color).toHaveProperty('b');
+        expect(color.r).toBeGreaterThanOrEqual(0);
+        expect(color.r).toBeLessThanOrEqual(255);
+      });
+    });
+  });
+
+  describe('hybrid dithering - target extraction', () => {
+    it('should extract target colors with error', () => {
+      const pixels = new Uint8ClampedArray(280 * 192 * 4);
+      // Fill with gray
+      for (let i = 0; i < pixels.length; i += 4) {
+        pixels[i] = 128;
+        pixels[i + 1] = 128;
+        pixels[i + 2] = 128;
+        pixels[i + 3] = 255;
+      }
+
+      const errorBuffer = Array(192).fill(null).map(() =>
+        Array(280).fill(null).map(() => [0, 0, 0])
+      );
+
+      const targets = dither.getTargetWithError(pixels, errorBuffer, 0, 0, 280);
+
+      expect(targets).toHaveLength(7);
+      targets.forEach(target => {
+        expect(target.r).toBe(128);
+        expect(target.g).toBe(128);
+        expect(target.b).toBe(128);
+      });
+    });
+
+    it('should apply error buffer corrections', () => {
+      const pixels = new Uint8ClampedArray(280 * 192 * 4);
+      for (let i = 0; i < pixels.length; i += 4) {
+        pixels[i] = 128;
+        pixels[i + 1] = 128;
+        pixels[i + 2] = 128;
+        pixels[i + 3] = 255;
+      }
+
+      const errorBuffer = Array(192).fill(null).map(() =>
+        Array(280).fill(null).map(() => [0, 0, 0])
+      );
+      // Add error to first pixel
+      errorBuffer[0][0] = [50, 0, 0];
+
+      const targets = dither.getTargetWithError(pixels, errorBuffer, 0, 0, 280);
+
+      // First pixel should have error applied
+      expect(targets[0].r).toBe(178); // 128 + 50
+      expect(targets[0].g).toBe(128);
+      expect(targets[0].b).toBe(128);
+    });
+  });
+
+  describe('hybrid dithering - full algorithm', () => {
+    it('should dither using hybrid algorithm', () => {
+      // Create a simple 280x192 test image
+      const canvas = document.createElement('canvas');
+      canvas.width = 280;
+      canvas.height = 192;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#808080'; // Gray
+      ctx.fillRect(0, 0, 280, 192);
+
+      const imageData = ctx.getImageData(0, 0, 280, 192);
+
+      const result = dither.ditherToHgr(imageData, 40, 192, 'hybrid');
+
+      expect(result).toBeInstanceOf(Uint8Array);
+      expect(result.length).toBe(40 * 192);
+    });
+
+    it('should dither using threshold algorithm', () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 280;
+      canvas.height = 192;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, 280, 192);
+
+      const imageData = ctx.getImageData(0, 0, 280, 192);
+
+      const result = dither.ditherToHgr(imageData, 40, 192, 'threshold');
+
+      expect(result).toBeInstanceOf(Uint8Array);
+      expect(result.length).toBe(40 * 192);
+    });
+
+    it('should throw on unknown algorithm', () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 280;
+      canvas.height = 192;
+      const imageData = canvas.getContext('2d').getImageData(0, 0, 280, 192);
+
+      expect(() => {
+        dither.ditherToHgr(imageData, 40, 192, 'unknown');
+      }).toThrow();
+    });
+  });
+
+  describe('structure-aware dithering', () => {
+    it('should dither using structure-aware algorithm', () => {
+      // Create a simple 280x192 test image
+      const canvas = document.createElement('canvas');
+      canvas.width = 280;
+      canvas.height = 192;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#808080'; // Gray
+      ctx.fillRect(0, 0, 280, 192);
+
+      const imageData = ctx.getImageData(0, 0, 280, 192);
+
+      const result = dither.ditherToHgr(imageData, 40, 192, 'structure-aware');
+
+      expect(result).toBeInstanceOf(Uint8Array);
+      expect(result.length).toBe(40 * 192);
+    });
+
+    it('should dither using structure-aware algorithm async', async () => {
+      // Create a simple 280x192 test image
+      const canvas = document.createElement('canvas');
+      canvas.width = 280;
+      canvas.height = 192;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#808080'; // Gray
+      ctx.fillRect(0, 0, 280, 192);
+
+      const imageData = ctx.getImageData(0, 0, 280, 192);
+
+      let progressCalls = 0;
+      const progressCallback = (completed, total) => {
+        progressCalls++;
+        expect(completed).toBeLessThanOrEqual(total);
+        expect(completed).toBeGreaterThan(0);
+      };
+
+      const result = await dither.ditherToHgrAsync(
+        imageData,
+        40,
+        192,
+        'structure-aware',
+        progressCallback
+      );
+
+      expect(result).toBeInstanceOf(Uint8Array);
+      expect(result.length).toBe(40 * 192);
+      expect(progressCalls).toBeGreaterThan(0); // Should have progress updates
+    });
+
+    it('should produce valid HGR bytes with structure-aware', () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 280;
+      canvas.height = 192;
+      const ctx = canvas.getContext('2d');
+
+      // Create an image with edges and smooth regions
+      ctx.fillStyle = '#FFFFFF'; // White background
+      ctx.fillRect(0, 0, 280, 192);
+      ctx.fillStyle = '#000000'; // Black square (creates edges)
+      ctx.fillRect(50, 50, 100, 100);
+
+      const imageData = ctx.getImageData(0, 0, 280, 192);
+      const result = dither.ditherToHgr(imageData, 40, 192, 'structure-aware');
+
+      // Verify all bytes are valid HGR bytes (0-255)
+      for (let i = 0; i < result.length; i++) {
+        expect(result[i]).toBeGreaterThanOrEqual(0);
+        expect(result[i]).toBeLessThanOrEqual(255);
+      }
+
+      // Verify we got some variation (not all zeros or all same)
+      const uniqueValues = new Set(result);
+      expect(uniqueValues.size).toBeGreaterThan(1);
+    });
+  });
 });
