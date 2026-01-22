@@ -32,6 +32,7 @@ import { greedyDitherScanline, greedyDitherScanlineAsync } from "./greedy-dither
 import { viterbiByteDither } from "./viterbi-byte-dither.js";
 import { nearestNeighborDitherScanline } from "./nearest-neighbor-dither.js";
 import { secondPassDitherScanline } from "./nearest-neighbor-second-pass.js";
+import { generateStructureHints } from "./structure-hints.js";
 
 //
 // Dithering engine for image-to-HGR conversion.
@@ -289,6 +290,23 @@ export default class ImageDither {
                 const nx = pixelX + dx;
                 const ny = y + dy;
 
+                // CRITICAL FIX: Do not diffuse error RIGHTWARD across byte boundaries
+                // NTSC artifact rendering already handles color bleed between bytes via
+                // the sliding window. Diffusing error rightward would double-count:
+                // - Error from last pixel of byte N is calculated with byte N-1 context
+                // - When byte N+1 renders, it already uses byte N as context
+                // - NTSC renderer compensates via color bleed in the sliding window
+                // - Adding diffused error on top creates double-correction artifacts
+                //
+                // We still diffuse DOWNWARD at byte boundaries because vertical
+                // scanlines are independent (no NTSC bleed between scanlines).
+                const isCrossingByteRight = (dy === 0 && dx > 0 && (pixelX % 7 === 6));
+
+                if (isCrossingByteRight) {
+                    // Skip rightward diffusion at byte boundary
+                    continue;
+                }
+
                 if (ny >= 0 && ny < errorBuffer.length && nx >= 0 && nx < pixelWidth) {
                     if (!errorBuffer[ny][nx]) {
                         errorBuffer[ny][nx] = [0, 0, 0];
@@ -339,7 +357,7 @@ export default class ImageDither {
      * @param {HTMLImageElement|ImageData} source - Source image
      * @param {number} targetWidth - Target width in bytes (40 for HGR)
      * @param {number} targetHeight - Target height (192 for HGR)
-     * @param {string} algorithm - Dithering algorithm: "hybrid" (default), "threshold", "viterbi", "greedy", "viterbi-byte"
+     * @param {string} algorithm - Dithering algorithm: "hybrid" (default), "threshold", "viterbi", "greedy", "viterbi-byte", "structure-aware"
      * @returns {Uint8Array} HGR screen data
      */
     ditherToHgr(source, targetWidth, targetHeight, algorithm = "hybrid") {
@@ -612,6 +630,58 @@ export default class ImageDither {
                 screen.set(scanline, y * targetWidth);
             }
 
+        } else if (algorithm === "structure-aware") {
+            // Structure-aware Viterbi optimization with structure hints
+            // This algorithm uses image structure detection to reduce graininess
+            // in smooth regions while preserving edge sharpness
+
+            // Generate structure hints from source image
+            const structureHints = generateStructureHints(pixels, pixelWidth, targetHeight);
+
+            // Initialize error buffer
+            const errorBuffer = new Array(targetHeight);
+            for (let y = 0; y < targetHeight; y++) {
+                errorBuffer[y] = new Array(pixelWidth);
+                for (let x = 0; x < pixelWidth; x++) {
+                    errorBuffer[y][x] = [0, 0, 0];
+                }
+            }
+
+            // PERFORMANCE: Create reusable buffers once for entire image
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            // Process each scanline with structure-aware Viterbi optimization
+            for (let y = 0; y < targetHeight; y++) {
+                const scanline = viterbiFullScanline(
+                    pixels,
+                    errorBuffer,
+                    y,
+                    targetWidth,
+                    pixelWidth,
+                    4, // beam width: K=4 for performance
+                    this.getTargetWithError.bind(this),
+                    null, // no progress callback
+                    renderer,
+                    imageData,
+                    hgrBytes,
+                    structureHints // pass structure hints to Viterbi
+                );
+                screen.set(scanline, y * targetWidth);
+
+                // Propagate error to next scanline (Floyd-Steinberg style)
+                for (let byteX = 0; byteX < targetWidth; byteX++) {
+                    const prevByte = byteX > 0 ? scanline[byteX - 1] : 0;
+                    const currByte = scanline[byteX];
+
+                    const target = this.getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth);
+                    const rendered = this.renderNTSCColors(prevByte, currByte, byteX);
+
+                    this.propagateErrorToBuffer(errorBuffer, byteX, y, target, rendered, pixelWidth);
+                }
+            }
+
         } else {
             throw new Error(`Unknown dithering algorithm: ${algorithm}`);
         }
@@ -626,7 +696,7 @@ export default class ImageDither {
      * @param {HTMLImageElement|ImageData} source - Source image
      * @param {number} targetWidth - Target width in bytes (40 for HGR)
      * @param {number} targetHeight - Target height (192 for HGR)
-     * @param {string} algorithm - Dithering algorithm: "hybrid" (default), "threshold", "viterbi", "greedy", "greedy-parallel", "viterbi-byte"
+     * @param {string} algorithm - Dithering algorithm: "hybrid" (default), "threshold", "viterbi", "greedy", "greedy-parallel", "viterbi-byte", "structure-aware"
      * @param {Function} progressCallback - Optional callback(completed, total) for progress updates
      * @returns {Promise<Uint8Array>} - HGR screen data
      */
@@ -1023,6 +1093,75 @@ export default class ImageDither {
                     progressCallback(targetHeight / 2 + batchEnd / 2, targetHeight); // Second pass is remaining 50%
                 }
 
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+
+        } else if (algorithm === "structure-aware") {
+            // Structure-aware Viterbi optimization with structure hints (async version)
+            // This algorithm uses image structure detection to reduce graininess
+            // in smooth regions while preserving edge sharpness
+
+            // Generate structure hints from source image
+            const structureHints = generateStructureHints(pixels, pixelWidth, targetHeight);
+
+            // Initialize error buffer
+            const errorBuffer = new Array(targetHeight);
+            for (let y = 0; y < targetHeight; y++) {
+                errorBuffer[y] = new Array(pixelWidth);
+                for (let x = 0; x < pixelWidth; x++) {
+                    errorBuffer[y][x] = [0, 0, 0];
+                }
+            }
+
+            // PERFORMANCE: Create reusable buffers once for entire image
+            const renderer = new NTSCRenderer();
+            const imageData = new ImageData(560, 1);
+            const hgrBytes = new Uint8Array(40);
+
+            // Process scanlines in batches to avoid blocking UI
+            const BATCH_SIZE = 10; // Similar performance to Viterbi
+
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                // Process this batch of scanlines
+                for (let y = batchStart; y < batchEnd; y++) {
+                    const scanline = viterbiFullScanline(
+                        pixels,
+                        errorBuffer,
+                        y,
+                        targetWidth,
+                        pixelWidth,
+                        4, // beam width: K=4 for performance
+                        this.getTargetWithError.bind(this),
+                        null, // no progress callback
+                        renderer,
+                        imageData,
+                        hgrBytes,
+                        structureHints // pass structure hints to Viterbi
+                    );
+                    screen.set(scanline, y * targetWidth);
+
+                    // Propagate error to next scanline
+                    for (let byteX = 0; byteX < targetWidth; byteX++) {
+                        const prevByte = byteX > 0 ? scanline[byteX - 1] : 0;
+                        const currByte = scanline[byteX];
+
+                        const target = this.getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth);
+                        const rendered = this.renderNTSCColors(prevByte, currByte, byteX);
+
+                        this.propagateErrorToBuffer(errorBuffer, byteX, y, target, rendered, pixelWidth);
+                    }
+                }
+
+                // Report progress if callback provided
+                if (progressCallback) {
+                    progressCallback(batchEnd, targetHeight);
+                }
+
+                // Yield to event loop to keep UI responsive
                 if (batchEnd < targetHeight) {
                     await new Promise(resolve => setTimeout(resolve, 0));
                 }

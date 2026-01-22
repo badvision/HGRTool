@@ -44,6 +44,20 @@ import NTSCRenderer from './ntsc-renderer.js';
 const SMOOTHNESS_WEIGHT = 70000.0;
 
 /**
+ * Structure-aware penalty weights.
+ *
+ * These multipliers adjust the smoothness penalty based on image structure:
+ * - SMOOTH regions: High penalty (discourage pattern changes, reduce graininess)
+ * - TEXTURE regions: Medium penalty (balance between accuracy and stability)
+ * - EDGE regions: Low penalty (allow pattern changes for sharp edges)
+ */
+const STRUCTURE_PENALTY_MULTIPLIER = {
+    SMOOTH: 1.5,   // 50% more penalty in smooth regions
+    TEXTURE: 1.0,  // Default penalty in textured regions
+    EDGE: 0.5      // 50% less penalty at edges
+};
+
+/**
  * Calculate NTSC-aware error for byte transition.
  *
  * This function evaluates the perceptual cost of transitioning from prevByte to
@@ -66,6 +80,11 @@ const SMOOTHNESS_WEIGHT = 70000.0;
  * COLOR SMOOTHNESS: Pattern change penalty reduces vertical banding by discouraging
  * rapid alternation between very different byte patterns (e.g., 0x55 <-> 0x2A).
  *
+ * STRUCTURE-AWARE PENALTY: When structure hint is provided, adjusts smoothness penalty:
+ * - SMOOTH: Increase penalty (reduce graininess)
+ * - TEXTURE: Default penalty (balance accuracy and stability)
+ * - EDGE: Reduce penalty (preserve edge sharpness)
+ *
  * @param {number} prevByte - Previous byte value (0-255)
  * @param {number} nextByte - Current byte value (0-255)
  * @param {Array<{r,g,b}>} targetColors - 7 target pixel colors for this byte
@@ -73,17 +92,30 @@ const SMOOTHNESS_WEIGHT = 70000.0;
  * @param {NTSCRenderer} renderer - Reusable NTSC renderer instance
  * @param {ImageData} imageData - Reusable ImageData buffer (560×1)
  * @param {Uint8Array} hgrBytes - Reusable HGR scanline buffer (40 bytes)
+ * @param {string} structureHint - Optional structure hint ('EDGE', 'TEXTURE', 'SMOOTH')
  * @returns {number} - Cumulative pixel error + smoothness penalty
  */
-export function calculateTransitionCost(prevByte, nextByte, targetColors, byteX, renderer, imageData, hgrBytes) {
-    // Clear the HGR buffer (reuse from previous call)
-    hgrBytes.fill(0);
+export function calculateTransitionCost(prevByte, nextByte, targetColors, byteX, renderer, imageData, hgrBytes, structureHint = null) {
+    // CRITICAL FIX: Use actual byteX position for correct NTSC phase,
+    // but ensure we have sufficient context to avoid artificial boundaries.
+    //
+    // NTSC sliding window needs surrounding bytes for accurate color rendering.
+    // We clear only the immediate region we're testing, leaving other bytes
+    // as they were from previous calculations (providing realistic context).
 
-    // Position bytes to simulate the transition at byteX
-    // We need at least 2 bytes to capture the byte boundary effects
-    const testByteX = byteX < 1 ? 1 : byteX; // Ensure we have room for prevByte
+    // For byteX=0, we need special handling since there's no prevByte position
+    const testByteX = Math.max(1, byteX);
+
+    // Clear only the 3-byte region we're actively testing
+    // This preserves context from previous calls while ensuring clean test
+    for (let i = Math.max(0, testByteX - 1); i <= Math.min(39, testByteX + 1); i++) {
+        hgrBytes[i] = 0;
+    }
+
+    // Position the bytes we're testing
     hgrBytes[testByteX - 1] = prevByte;
     hgrBytes[testByteX] = nextByte;
+    // byte at testByteX + 1 stays 0, representing "unknown future"
 
     // Render using actual NTSC renderer (reuses imageData buffer)
     renderer.renderHgrScanline(imageData, hgrBytes, 0, 0);
@@ -91,7 +123,8 @@ export function calculateTransitionCost(prevByte, nextByte, targetColors, byteX,
     // Extract rendered colors for the 7 pixels of nextByte
     const renderedColors = [];
     for (let bitPos = 0; bitPos < 7; bitPos++) {
-        // Calculate pixel position in HGR space (280 pixels wide)
+        // Calculate pixel position in HGR space using ACTUAL test position
+        // This ensures NTSC phase matches the actual position in the scanline
         const pixelX = testByteX * 7 + bitPos;
 
         // Convert to NTSC space (560 pixels wide, 2x horizontal resolution)
@@ -145,6 +178,11 @@ export function calculateTransitionCost(prevByte, nextByte, targetColors, byteX,
         if ((prevByte & 0x80) === 0 && (nextByte & 0x80) !== 0) {
             // Switching from hi-bit 0 to hi-bit 1: reduce cost slightly to encourage exploration
             smoothnessPenalty *= 0.5;
+        }
+
+        // STRUCTURE-AWARE ADJUSTMENT: Apply multiplier based on structure hint
+        if (structureHint && STRUCTURE_PENALTY_MULTIPLIER[structureHint]) {
+            smoothnessPenalty *= STRUCTURE_PENALTY_MULTIPLIER[structureHint];
         }
     }
 
