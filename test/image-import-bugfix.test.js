@@ -39,7 +39,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
 
       // This should not throw an error
       expect(() => {
-        const hgrData = dither.ditherToHgr(imageData, 40, 192, true);
+        const hgrData = dither.ditherToHgr(imageData, 40, 192, 'threshold');
         expect(hgrData).toBeInstanceOf(Uint8Array);
       }).not.toThrow();
     });
@@ -47,7 +47,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
     it('should return correct buffer size for HGR (40 bytes * 192 rows = 7680)', () => {
       const imageData = createImageData(280, 192, [0, 0, 0]);
 
-      const hgrData = dither.ditherToHgr(imageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(imageData, 40, 192, 'threshold');
 
       expect(hgrData.length).toBe(7680); // 40 bytes per row * 192 rows
     });
@@ -56,7 +56,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
       // This was the main bug scenario - larger image would cause garbage
       const largeImageData = createImageData(560, 384, [128, 128, 128]);
 
-      const hgrData = dither.ditherToHgr(largeImageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(largeImageData, 40, 192, 'threshold');
 
       expect(hgrData).toBeInstanceOf(Uint8Array);
       expect(hgrData.length).toBe(7680);
@@ -65,7 +65,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
     it('should handle ImageData smaller than target without crashing', () => {
       const smallImageData = createImageData(140, 96, [128, 128, 128]);
 
-      const hgrData = dither.ditherToHgr(smallImageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(smallImageData, 40, 192, 'threshold');
 
       expect(hgrData).toBeInstanceOf(Uint8Array);
       expect(hgrData.length).toBe(7680);
@@ -74,7 +74,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
     it('should handle ImageData exactly matching target dimensions', () => {
       const exactImageData = createImageData(280, 192, [128, 128, 128]);
 
-      const hgrData = dither.ditherToHgr(exactImageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(exactImageData, 40, 192, 'threshold');
 
       expect(hgrData).toBeInstanceOf(Uint8Array);
       expect(hgrData.length).toBe(7680);
@@ -83,7 +83,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
     it('should handle very large ImageData gracefully', () => {
       const hugeImageData = createImageData(1920, 1080, [64, 64, 64]);
 
-      const hgrData = dither.ditherToHgr(hugeImageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(hugeImageData, 40, 192, 'threshold');
 
       expect(hgrData).toBeInstanceOf(Uint8Array);
       expect(hgrData.length).toBe(7680);
@@ -92,7 +92,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
     it('should handle very small ImageData gracefully', () => {
       const tinyImageData = createImageData(70, 48, [192, 192, 192]);
 
-      const hgrData = dither.ditherToHgr(tinyImageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(tinyImageData, 40, 192, 'threshold');
 
       expect(hgrData).toBeInstanceOf(Uint8Array);
       expect(hgrData.length).toBe(7680);
@@ -103,7 +103,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
     it('should produce bytes in valid range (0-255)', () => {
       const imageData = createImageData(280, 192, [100, 150, 200]);
 
-      const hgrData = dither.ditherToHgr(imageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(imageData, 40, 192, 'threshold');
 
       // Every byte should be valid (0-255)
       for (let i = 0; i < hgrData.length; i++) {
@@ -115,7 +115,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
     it('should process all rows (each row is 40 bytes)', () => {
       const imageData = createImageData(280, 192, [128, 128, 128]);
 
-      const hgrData = dither.ditherToHgr(imageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(imageData, 40, 192, 'threshold');
 
       // Verify we can access all rows without error
       for (let row = 0; row < 192; row++) {
@@ -132,7 +132,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
       const imageData = createImageData(280, 192, [128, 128, 128]);
 
       dither.setDitherAlgorithm('floyd-steinberg');
-      const hgrData = dither.ditherToHgr(imageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(imageData, 40, 192, 'threshold');
 
       expect(hgrData.length).toBe(7680);
     });
@@ -141,7 +141,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
       const imageData = createImageData(280, 192, [128, 128, 128]);
 
       dither.setDitherAlgorithm('atkinson');
-      const hgrData = dither.ditherToHgr(imageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(imageData, 40, 192, 'threshold');
 
       expect(hgrData.length).toBe(7680);
     });
@@ -150,7 +150,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
       const imageData = createImageData(280, 192, [128, 128, 128]);
 
       dither.setDitherAlgorithm('jarvis-judice-ninke');
-      const hgrData = dither.ditherToHgr(imageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(imageData, 40, 192, 'threshold');
 
       expect(hgrData.length).toBe(7680);
     });
@@ -160,7 +160,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
     it('should handle wide images (16:9 aspect)', () => {
       const wideImageData = createImageData(1920, 1080, [128, 128, 128]);
 
-      const hgrData = dither.ditherToHgr(wideImageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(wideImageData, 40, 192, 'threshold');
 
       expect(hgrData.length).toBe(7680);
     });
@@ -168,7 +168,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
     it('should handle tall images (9:16 aspect)', () => {
       const tallImageData = createImageData(1080, 1920, [128, 128, 128]);
 
-      const hgrData = dither.ditherToHgr(tallImageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(tallImageData, 40, 192, 'threshold');
 
       expect(hgrData.length).toBe(7680);
     });
@@ -176,7 +176,7 @@ describe('Image Import Bug Fix - ImageData Scaling', () => {
     it('should handle square images', () => {
       const squareImageData = createImageData(800, 800, [128, 128, 128]);
 
-      const hgrData = dither.ditherToHgr(squareImageData, 40, 192, true);
+      const hgrData = dither.ditherToHgr(squareImageData, 40, 192, 'threshold');
 
       expect(hgrData.length).toBe(7680);
     });

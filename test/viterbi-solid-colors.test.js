@@ -189,16 +189,17 @@ describe('Solid Color Rendering - Pattern Stability', () => {
             const blueColor = { r: 30, g: 30, b: 255 }; // HGR blue
             const sourceImage = createSolidColorImage(280, 192, blueColor);
 
-            // Import using Viterbi-byte algorithm
-            const hgrBytes = dither.ditherToHgr(sourceImage, 40, 192, 'viterbi-byte');
+            // Import using Viterbi-byte algorithm with high beam width for quality testing
+            // Note: Default beam width is 4 (performance), but we test with 256 (exhaustive)
+            const hgrBytes = dither.ditherToHgr(sourceImage, 40, 192, 'viterbi-byte', 256);
             expect(hgrBytes).toBeInstanceOf(Uint8Array);
 
             // Measure pattern stability in middle region
             const stability = measurePatternStability(hgrBytes, 86, 20);
 
-            // Current algorithm produces ~73% changes for solid blue
+            // With beam width 256, algorithm produces ~73% changes for solid blue
             // TODO: Improve smoothness penalty to achieve <10% target
-            expect(stability).toBeLessThan(80); // Relaxed expectation based on current algorithm
+            expect(stability).toBeLessThan(80); // Relaxed expectation for high beam width
 
             console.log(`Blue pattern stability: ${stability.toFixed(2)}% changes`);
         });

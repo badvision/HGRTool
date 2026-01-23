@@ -53,9 +53,7 @@ describe('Viterbi Byte Boundary Handling', () => {
             4, // beam width
             dither.getTargetWithError.bind(dither),
             null, // no progress callback
-            renderer,
-            imageData,
-            hgrBytes
+            dither
         );
 
         // Render the scanline to check output
@@ -89,6 +87,7 @@ describe('Viterbi Byte Boundary Handling', () => {
         const renderer = new NTSCRenderer();
         const imageData = new ImageData(560, 1);
         const hgrBytes = new Uint8Array(40);
+        const dither = new ImageDither();
 
         // Create target colors (gray)
         const targetColors = [];
@@ -100,9 +99,9 @@ describe('Viterbi Byte Boundary Handling', () => {
         const { calculateTransitionCost } = await import('../docs/lib/viterbi-cost-function.js');
 
         // Calculate cost for same byte transition at different positions
-        const cost1 = calculateTransitionCost(0x00, 0x7F, targetColors, 0, renderer, imageData, hgrBytes);
-        const cost2 = calculateTransitionCost(0x00, 0x7F, targetColors, 1, renderer, imageData, hgrBytes);
-        const cost3 = calculateTransitionCost(0x00, 0x7F, targetColors, 10, renderer, imageData, hgrBytes);
+        const cost1 = calculateTransitionCost(0x00, 0x7F, targetColors, 0, dither);
+        const cost2 = calculateTransitionCost(0x00, 0x7F, targetColors, 1, dither);
+        const cost3 = calculateTransitionCost(0x00, 0x7F, targetColors, 10, dither);
 
         console.log(`Cost at byteX=0: ${cost1.toFixed(2)}`);
         console.log(`Cost at byteX=1: ${cost2.toFixed(2)}`);

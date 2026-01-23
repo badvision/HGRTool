@@ -34,13 +34,16 @@ import { describe, it, expect, beforeAll } from 'vitest';
 
 let viterbiByteDither;
 let NTSCRenderer;
+let ImageDither;
 
 beforeAll(async () => {
     const viterbiModule = await import('../docs/src/lib/viterbi-byte-dither.js');
     const ntscModule = await import('../docs/src/lib/ntsc-renderer.js');
+    const imageDitherModule = await import('../docs/src/lib/image-dither.js');
 
     viterbiByteDither = viterbiModule.viterbiByteDither;
     NTSCRenderer = ntscModule.default;
+    ImageDither = imageDitherModule.default;
 
     // Initialize NTSC palettes
     new NTSCRenderer();
@@ -66,9 +69,7 @@ describe('Viterbi Phase Alignment', () => {
         }
 
         // Initialize algorithm components
-        const renderer = new NTSCRenderer();
-        const imageData = new ImageData(560, 1); // NTSC is 2x width
-        const hgrBytes = new Uint8Array(40);
+        const imageDither = new ImageDither();
         const errorBuffer = new Array(width * height);
 
         // Run Viterbi on first scanline
@@ -79,9 +80,8 @@ describe('Viterbi Phase Alignment', () => {
             40, // targetWidth (bytes)
             280, // pixelWidth
             192, // height
-            renderer,
-            imageData,
-            hgrBytes
+            imageDither,
+            16 // beamWidth
         );
 
         // Check first byte (byte 0)
@@ -128,9 +128,7 @@ describe('Viterbi Phase Alignment', () => {
         }
 
         // Initialize algorithm components
-        const renderer = new NTSCRenderer();
-        const imageData = new ImageData(560, 1);
-        const hgrBytes = new Uint8Array(40);
+        const imageDither = new ImageDither();
         const errorBuffer = new Array(width * height);
 
         // Run Viterbi on first scanline
@@ -141,9 +139,8 @@ describe('Viterbi Phase Alignment', () => {
             40,
             280,
             192,
-            renderer,
-            imageData,
-            hgrBytes
+            imageDither,
+            16 // beamWidth
         );
 
         // Check second byte (byte 1) - starts at phase 3 (7 mod 4 = 3)
@@ -187,9 +184,7 @@ describe('Viterbi Phase Alignment', () => {
             pixels[i + 3] = 255;
         }
 
-        const renderer = new NTSCRenderer();
-        const imageData = new ImageData(560, 1);
-        const hgrBytes = new Uint8Array(40);
+        const imageDither = new ImageDither();
         const errorBuffer = new Array(width * height);
 
         const scanline = viterbiByteDither(
@@ -199,9 +194,8 @@ describe('Viterbi Phase Alignment', () => {
             40,
             280,
             192,
-            renderer,
-            imageData,
-            hgrBytes
+            imageDither,
+            16 // beamWidth
         );
 
         const byte0 = scanline[0];

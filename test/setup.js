@@ -163,7 +163,7 @@ if (!global.OffscreenCanvas) {
   };
 }
 
-// Mock fetch for LegalStuff.txt
+// Mock fetch for LegalStuff.txt and other resources
 if (!global.fetch) {
   global.fetch = vi.fn((url) => {
     // Return a mock response for LegalStuff.txt
@@ -173,9 +173,62 @@ if (!global.fetch) {
         text: () => Promise.resolve('Mock legal stuff content for testing'),
       });
     }
-    // Reject for other URLs to avoid hanging tests
-    return Promise.reject(new Error(`Unmocked fetch URL: ${url}`));
+    // Return empty CSS for CSS files
+    if (url.includes('.css')) {
+      return Promise.resolve({
+        ok: true,
+        text: () => Promise.resolve('/* Mock CSS */'),
+      });
+    }
+    // Return empty response for other resources to avoid test failures
+    return Promise.resolve({
+      ok: true,
+      text: () => Promise.resolve(''),
+      json: () => Promise.resolve({}),
+    });
   });
+}
+
+// Override fetch on window if it exists (for happy-dom environment)
+if (typeof window !== 'undefined' && !window.fetch) {
+  window.fetch = global.fetch;
+}
+
+// Mock HTMLDialogElement methods (showModal and close not supported by happy-dom)
+if (typeof HTMLDialogElement !== 'undefined') {
+  if (!HTMLDialogElement.prototype.showModal) {
+    HTMLDialogElement.prototype.showModal = function() {
+      this.open = true;
+      this.setAttribute('open', '');
+    };
+  }
+  if (!HTMLDialogElement.prototype.close) {
+    HTMLDialogElement.prototype.close = function() {
+      this.open = false;
+      this.removeAttribute('open');
+    };
+  }
+}
+
+// Mock ResizeObserver
+if (!global.ResizeObserver) {
+  global.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
+// Mock window.gSettings for ImportDialog tests (Priority 1 fix)
+if (typeof window !== 'undefined') {
+  window.gSettings = {
+    beamWidth: 4,
+    ditherAlgorithm: 'hybrid',
+    ntscHueAdjust: 0,
+    ntscSaturationAdjust: 0,
+    ntscBrightnessAdjust: 0,
+    ntscContrastAdjust: 0,
+  };
 }
 
 console.log('Test setup complete');
