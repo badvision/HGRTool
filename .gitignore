@@ -432,3 +432,6 @@ FodyWeavers.xsd
 
 # Test output directory
 test-output/
+.ssl/
+playwright-report/
+test-results/
