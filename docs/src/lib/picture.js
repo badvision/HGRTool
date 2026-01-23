@@ -135,11 +135,23 @@ export default class Picture {
     }
 
     //
-    // Width/height of pixel image, e.g. will be 280 / 192 for standard hi-res.
+    // Width properties:
+    // - logicalWidth: Always 280 for HGR (used for drawing tools and display scaling)
+    // - physicalWidth: 280 for RGB/mono, 560 for NTSC (actual ImageData width)
+    // - width: Backward-compatible alias to logicalWidth
     //
-    get width() {
-        return this.pixelImage.width;
+    get logicalWidth() {
+        return StdHiRes.NUM_COLS;  // Always 280 for HGR
     }
+
+    get physicalWidth() {
+        return this.pixelImage.width;  // 280 for RGB/mono, 560 for NTSC
+    }
+
+    get width() {
+        return this.logicalWidth;  // Alias to logicalWidth for backward compatibility
+    }
+
     get height() {
         return this.pixelImage.height;
     }
@@ -417,7 +429,7 @@ export default class Picture {
                 let yc = canvasOffY + (i * this.scale) + this.scale;
                 picCtx.beginPath();
                 picCtx.moveTo(canvasOffX, yc);
-                picCtx.lineTo(canvasOffX + this.pixelImage.width * this.scale, yc);
+                picCtx.lineTo(canvasOffX + this.width * this.scale, yc);
                 picCtx.stroke();
             }
         }

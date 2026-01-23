@@ -127,11 +127,13 @@ export default class ImageDither {
      * @param {number} currByte - Current byte candidate
      * @param {Array<{r, g, b}>} targetColors - Target colors for 7 pixels
      * @param {number} xPos - Byte position in scanline (0-39)
+     * @param {number} nextByte - Next byte in scanline (optional, defaults to 0)
      * @returns {number} - Total error for this byte
      */
-    calculateNTSCError(prevByte, currByte, targetColors, xPos) {
+    calculateNTSCError(prevByte, currByte, targetColors, xPos, nextByte = 0) {
         // Use existing hgrToDhgr lookup to get expanded bit pattern
         const dhgrBits = NTSCRenderer.hgrToDhgr[prevByte][currByte];
+        const dhgrBitsNext = NTSCRenderer.hgrToDhgr[currByte][nextByte];
 
         let totalError = 0;
 
@@ -144,6 +146,9 @@ export default class ImageDither {
         //
         // Each HGR pixel position needs a 7-bit DHGR pattern for NTSC color lookup.
         // The pattern window slides across the current byte's DHGR bits.
+        //
+        // BYTE BOUNDARY FIX: The last pixel (bitPos=6) needs bits from the NEXT byte
+        // to correctly extract the 7-bit pattern, otherwise phase calculation is wrong.
 
         // Evaluate each of the 7 pixels in this byte
         for (let bitPos = 0; bitPos < 7; bitPos++) {
@@ -153,7 +158,17 @@ export default class ImageDither {
 
             // Extract 7-bit pattern for NTSC lookup
             // Need to include context from previous bits for proper color rendering
-            const pattern = (dhgrBits >> (dhgrStartBit - 3)) & 0x7F;
+            let pattern;
+            if (bitPos === 6) {
+                // Last pixel: extract pattern spanning current and next byte
+                // We need bits 23-27 from current byte and bits 0-1 from next byte
+                const bitsFromCurrent = (dhgrBits >> 23) & 0x1F; // 5 bits (23-27)
+                const bitsFromNext = dhgrBitsNext & 0x03; // 2 bits (0-1)
+                pattern = (bitsFromCurrent | (bitsFromNext << 5)) & 0x7F;
+            } else {
+                // Normal extraction within current byte
+                pattern = (dhgrBits >> (dhgrStartBit - 3)) & 0x7F;
+            }
 
             // Phase calculation: NTSC repeats every 4 DHGR pixels
             // Each HGR pixel = 2 DHGR pixels, so phase = (hgrPixel * 2) % 4
@@ -226,16 +241,30 @@ export default class ImageDither {
      * @param {number} prevByte - Previous byte in scanline
      * @param {number} currByte - Current byte
      * @param {number} xPos - Byte position in scanline (0-39)
+     * @param {number} nextByte - Next byte in scanline (optional, defaults to 0)
      * @returns {Array<{r, g, b}>} - Rendered colors for 7 pixels
      */
-    renderNTSCColors(prevByte, currByte, xPos) {
+    renderNTSCColors(prevByte, currByte, xPos, nextByte = 0) {
         const dhgrBits = NTSCRenderer.hgrToDhgr[prevByte][currByte];
+        const dhgrBitsNext = NTSCRenderer.hgrToDhgr[currByte][nextByte];
         const colors = [];
 
         for (let bitPos = 0; bitPos < 7; bitPos++) {
             // Same logic as calculateNTSCError: extract from current byte region
             const dhgrStartBit = 14 + (bitPos * 2);
-            const pattern = (dhgrBits >> (dhgrStartBit - 3)) & 0x7F;
+
+            // For the last pixel (bitPos=6), we need bits from the next byte too
+            let pattern;
+            if (bitPos === 6) {
+                // Extract pattern spanning current and next byte
+                // We need bits 23-27 from current byte and bits 0-1 from next byte
+                const bitsFromCurrent = (dhgrBits >> 23) & 0x1F; // 5 bits (23-27)
+                const bitsFromNext = dhgrBitsNext & 0x03; // 2 bits (0-1)
+                pattern = (bitsFromCurrent | (bitsFromNext << 5)) & 0x7F;
+            } else {
+                // Normal extraction within current byte
+                pattern = (dhgrBits >> (dhgrStartBit - 3)) & 0x7F;
+            }
 
             // Phase calculation: NTSC repeats every 4 DHGR pixels
             // Each HGR pixel = 2 DHGR pixels, so phase = (hgrPixel * 2) % 4
@@ -404,9 +433,10 @@ export default class ImageDither {
      * @param {number} targetWidth - Target width in bytes (40 for HGR)
      * @param {number} targetHeight - Target height (192 for HGR)
      * @param {string} algorithm - Dithering algorithm: "hybrid" (default), "threshold", "viterbi", "greedy", "viterbi-byte", "structure-aware"
+     * @param {number} beamWidth - Beam width for Viterbi algorithms (default 4 for viterbi, 16 for viterbi-byte)
      * @returns {Uint8Array} HGR screen data
      */
-    ditherToHgr(source, targetWidth, targetHeight, algorithm = "hybrid") {
+    ditherToHgr(source, targetWidth, targetHeight, algorithm = "hybrid", beamWidth = 4) {
         // Create a canvas to work with the source image
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
@@ -530,7 +560,7 @@ export default class ImageDither {
                     y,
                     targetWidth,
                     pixelWidth,
-                    4, // beam width: K=4 gives 75% speedup vs K=16 (19s for full image)
+                    beamWidth, // configurable beam width (default K=4)
                     this.getTargetWithError.bind(this), // Pass helper function
                     null, // no progress callback
                     this // pass ImageDither instance with centralized functions
@@ -688,7 +718,7 @@ export default class ImageDither {
                     y,
                     targetWidth,
                     pixelWidth,
-                    4, // beam width: K=4 for performance
+                    beamWidth, // configurable beam width (default K=4)
                     this.getTargetWithError.bind(this),
                     null, // no progress callback
                     this, // pass ImageDither instance with centralized functions

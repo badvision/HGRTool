@@ -122,15 +122,8 @@ function getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth) {
  * @returns {{totalError: number, renderedColors: Array<{r,g,b}>}} - Total error and rendered colors
  */
 function calculateByteErrorWithColors(prevByte, candidateByte, targetColors, byteX, imageDither, greedyPreFill = null, scanlineSoFar = null) {
-    if (!greedyPreFill) {
-        // Fast path: no pre-fill context, use simple cached lookup
-        const totalError = imageDither.calculateNTSCError(prevByte, candidateByte, targetColors, byteX);
-        const renderedColors = imageDither.renderNTSCColors(prevByte, candidateByte, byteX);
-        return { totalError, renderedColors };
-    }
-
     // Construct test scanline with candidate + greedy pre-fill for realistic context
-    const testScanline = new Uint8Array(greedyPreFill.length);
+    const testScanline = new Uint8Array(greedyPreFill ? greedyPreFill.length : 40);
 
     // Copy committed bytes (0 to byteX-1)
     if (scanlineSoFar) {
@@ -142,15 +135,19 @@ function calculateByteErrorWithColors(prevByte, candidateByte, targetColors, byt
     // Insert candidate byte
     testScanline[byteX] = candidateByte;
 
-    // Fill future bytes with greedy pre-fill values
-    for (let i = byteX + 1; i < greedyPreFill.length; i++) {
-        testScanline[i] = greedyPreFill[i];
+    // Fill future bytes with greedy pre-fill values (or 0 if no pre-fill)
+    if (greedyPreFill) {
+        for (let i = byteX + 1; i < greedyPreFill.length; i++) {
+            testScanline[i] = greedyPreFill[i];
+        }
     }
 
-    // Render the current byte with future context by using renderNTSCColors
-    // which considers prevByte context. For even better accuracy, we render
-    // the current byte and a few bytes ahead to capture NTSC color interactions.
-    const renderedColors = imageDither.renderNTSCColors(prevByte, candidateByte, byteX);
+    // Get next byte for complete pattern extraction at byte boundary
+    const nextByte = testScanline[byteX + 1] || 0;
+
+    // Render the current byte with BOTH prevByte and nextByte context
+    // This is critical for correct phase calculation at byte boundaries
+    const renderedColors = imageDither.renderNTSCColors(prevByte, candidateByte, byteX, nextByte);
 
     // Calculate error between target and rendered
     let totalError = 0;
