@@ -592,11 +592,6 @@ export default class ImageDither {
             // Initialize error buffer (flat array for better performance)
             const errorBuffer = new Array(targetHeight * pixelWidth);
 
-            // PERFORMANCE: Create reusable buffers once for entire image
-            const renderer = new NTSCRenderer();
-            const imageData = new ImageData(560, 1);
-            const hgrBytes = new Uint8Array(40);
-
             // Process each scanline with Viterbi byte-level optimization
             for (let y = 0; y < targetHeight; y++) {
                 const scanline = viterbiByteDither(
@@ -606,9 +601,7 @@ export default class ImageDither {
                     targetWidth,
                     pixelWidth,
                     targetHeight,
-                    renderer,
-                    imageData,
-                    hgrBytes
+                    this
                 );
                 screen.set(scanline, y * targetWidth);
             }
@@ -1009,11 +1002,6 @@ export default class ImageDither {
             // Hybrid Viterbi-per-byte with byte-level error diffusion (async)
             const errorBuffer = new Array(targetHeight * pixelWidth);
 
-            // PERFORMANCE: Create reusable buffers once for entire image
-            const renderer = new NTSCRenderer();
-            const imageData = new ImageData(560, 1);
-            const hgrBytes = new Uint8Array(40);
-
             // Process scanlines in batches to avoid blocking UI
             const BATCH_SIZE = 10; // Similar performance to greedy
 
@@ -1028,9 +1016,7 @@ export default class ImageDither {
                         targetWidth,
                         pixelWidth,
                         targetHeight,
-                        renderer,
-                        imageData,
-                        hgrBytes
+                        this
                     );
                     screen.set(scanline, y * targetWidth);
                 }
