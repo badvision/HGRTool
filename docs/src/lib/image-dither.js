@@ -601,7 +601,8 @@ export default class ImageDither {
                     targetWidth,
                     pixelWidth,
                     targetHeight,
-                    this
+                    this,
+                    beamWidth // Pass beam width parameter
                 );
                 screen.set(scanline, y * targetWidth);
             }
@@ -1016,7 +1017,8 @@ export default class ImageDither {
                         targetWidth,
                         pixelWidth,
                         targetHeight,
-                        this
+                        this,
+                        beamWidth // Pass beam width parameter
                     );
                     screen.set(scanline, y * targetWidth);
                 }

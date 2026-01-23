@@ -162,9 +162,15 @@ function calculateByteErrorWithColors(prevByte, candidateByte, targetColors, byt
 }
 
 /**
- * Finds the best byte using Viterbi-style exhaustive search with greedy pre-fill context.
- * Tests all 256 possible byte values using cached NTSC palette lookups.
+ * Finds the best byte using Viterbi-style search with greedy pre-fill context and beam width.
+ * Tests up to beamWidth candidate byte values using cached NTSC palette lookups.
  * Returns both the best byte and its rendered colors for error diffusion.
+ *
+ * BEAM WIDTH STRATEGY:
+ * - Always test greedy suggestion (if available) as first candidate
+ * - Test evenly-spaced candidates across the 0-255 range to ensure coverage
+ * - Lower beam width = faster but potentially lower quality
+ * - Beam width of 256 = exhaustive search (tests all bytes)
  *
  * GREEDY PRE-FILL GUIDANCE: Uses greedy result as a hint about what byte value would
  * work well in this position. Adds a penalty for deviating from the greedy value,
@@ -182,9 +188,10 @@ function calculateByteErrorWithColors(prevByte, candidateByte, targetColors, byt
  * @param {ImageDither} imageDither - ImageDither instance for NTSC calculations
  * @param {Uint8Array} greedyPreFill - Optional greedy scanline for guidance
  * @param {Uint8Array} scanlineSoFar - Optional partial scanline with committed bytes
+ * @param {number} beamWidth - Maximum number of candidates to test (default 256 = exhaustive)
  * @returns {{byte: number, renderedColors: Array<{r,g,b}>}} - Best byte and its rendered colors
  */
-function findBestByteViterbi(prevByte, targetColors, byteX, imageDither, greedyPreFill = null, scanlineSoFar = null) {
+function findBestByteViterbi(prevByte, targetColors, byteX, imageDither, greedyPreFill = null, scanlineSoFar = null, beamWidth = 256) {
     let bestByte = 0;
     let leastError = Infinity;
     let bestRenderedColors = null;
@@ -219,9 +226,41 @@ function findBestByteViterbi(prevByte, targetColors, byteX, imageDither, greedyP
     // but not so large that it prevents beneficial deviations
     const greedyDeviationPenalty = 5000;
 
-    // Exhaustive search: test all 256 possible bytes
-    // Uses proven cached NTSC palette lookups for correct error calculation
-    for (let byte = 0; byte < 256; byte++) {
+    // Build candidate list based on beam width
+    const candidates = new Set();
+
+    // Always test greedy suggestion first (if available)
+    if (greedySuggestion !== null) {
+        candidates.add(greedySuggestion);
+    }
+
+    // If beam width allows exhaustive search, test all 256 bytes
+    if (beamWidth >= 256) {
+        for (let byte = 0; byte < 256; byte++) {
+            candidates.add(byte);
+        }
+    } else {
+        // Sample evenly across 0-255 range for coverage
+        // Ensure we test diverse candidates including extremes
+        const step = Math.max(1, Math.floor(256 / beamWidth));
+        for (let i = 0; i < beamWidth && candidates.size < beamWidth; i++) {
+            const byte = Math.min(255, i * step);
+            candidates.add(byte);
+        }
+
+        // Always test 0 and 255 (extremes) for better coverage
+        candidates.add(0);
+        candidates.add(255);
+
+        // Fill remaining slots with random sampling if needed
+        while (candidates.size < beamWidth) {
+            const randomByte = Math.floor(Math.random() * 256);
+            candidates.add(randomByte);
+        }
+    }
+
+    // Test all candidates
+    for (const byte of candidates) {
         const { totalError, renderedColors } = calculateByteErrorWithColors(
             prevByte,
             byte,
@@ -350,19 +389,23 @@ function distributeByteError(errorBuffer, byteX, y, targetColors, renderedColors
 }
 
 /**
- * Dithers a single scanline using hybrid Viterbi-per-byte with greedy pre-fill.
+ * Dithers a single scanline using hybrid Viterbi-per-byte with greedy pre-fill and beam width.
  *
  * This is the main entry point for the hybrid algorithm. Process:
  * 1. Run fast greedy pass to get baseline scanline (pre-fill with reasonable values)
  * 2. For each byte position:
  *    a. Extract target colors with accumulated error
- *    b. Use Viterbi to find best byte (exhaustive search with greedy guidance)
+ *    b. Use Viterbi to find best byte (beam search with greedy guidance)
  *    c. Calculate aggregate error for the byte
  *    d. Distribute error to 3 neighbors (right, down, down-right)
  *
  * The greedy pre-fill provides two benefits:
  * - Gives Viterbi a reasonable starting point (penalty for deviating from greedy)
  * - Prevents poor local decisions by biasing toward globally sensible values
+ *
+ * Beam width controls the quality/speed tradeoff:
+ * - Lower beam width (e.g., 16) = faster, tests fewer candidates
+ * - Higher beam width (e.g., 256) = slower, exhaustive search for best quality
  *
  * @param {Uint8ClampedArray} pixels - Source pixel data
  * @param {Array} errorBuffer - Error buffer (flat array)
@@ -371,9 +414,10 @@ function distributeByteError(errorBuffer, byteX, y, targetColors, renderedColors
  * @param {number} pixelWidth - Width in pixels (280)
  * @param {number} height - Height in pixels (192)
  * @param {ImageDither} imageDither - ImageDither instance for NTSC calculations
+ * @param {number} beamWidth - Maximum candidates to test per byte (default 256)
  * @returns {Uint8Array} - Scanline data (40 bytes)
  */
-export function viterbiByteDither(pixels, errorBuffer, y, targetWidth, pixelWidth, height, imageDither) {
+export function viterbiByteDither(pixels, errorBuffer, y, targetWidth, pixelWidth, height, imageDither, beamWidth = 256) {
     // Step 1: Run greedy pass to get pre-fill values (provides reasonable baseline)
     // Use a separate error buffer so greedy's error diffusion doesn't affect viterbi
     const greedyErrorBuffer = errorBuffer ? new Array(errorBuffer.length) : null;
@@ -395,7 +439,7 @@ export function viterbiByteDither(pixels, errorBuffer, y, targetWidth, pixelWidt
         // Get target colors with accumulated error
         const targetColors = getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth);
 
-        // Find best byte using Viterbi with greedy pre-fill guidance
+        // Find best byte using Viterbi with greedy pre-fill guidance and beam width
         const prevByte = byteX > 0 ? scanline[byteX - 1] : 0;
         const { byte: bestByte, renderedColors } = findBestByteViterbi(
             prevByte,
@@ -403,7 +447,8 @@ export function viterbiByteDither(pixels, errorBuffer, y, targetWidth, pixelWidt
             byteX,
             imageDither,
             greedyPreFill,
-            scanline
+            scanline,
+            beamWidth
         );
 
         // Commit best byte
