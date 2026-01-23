@@ -8,16 +8,32 @@ export default defineConfig({
   workers: 1, // Run tests serially to avoid port conflicts
   reporter: 'html',
 
+  // Global timeout: 90s - Maximum time for entire test suite run per worker
+  // Allows for slow Viterbi image conversions (10-20s) while preventing indefinite hangs
+  timeout: 90000,
+
+  // Assertion timeout: 5s - expect() statements must complete within this time
+  expect: {
+    timeout: 5000,
+  },
+
   use: {
     baseURL: 'http://localhost:8080',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+
+    // Action timeout: 15s - Maximum time for UI interactions (clicks, inputs, navigation)
+    // Generous enough for file dialogs and image loading, but prevents infinite waits
+    actionTimeout: 15000,
   },
 
   projects: [
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      // Per-test timeout: 30s - Maximum time for any individual test
+      // Most tests complete in <5s; this allows for slow image conversion tests
+      timeout: 30000,
     },
   ],
 
