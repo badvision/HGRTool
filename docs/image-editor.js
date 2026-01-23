@@ -25,6 +25,7 @@ import FontPicker from "./font-picker.js";
 import TextEntry from "./text-entry.js";
 import Settings from "./settings.js";
 import About from "./about.js";
+import { ImportDialog } from "./dialogs/import-dialog.js";
 
 //
 // Image editor implementation, tied closely to the HTML page.  Only one instance of this
@@ -97,8 +98,8 @@ class ImageEditor {
             this.handleNew.bind(this));
         document.getElementById("btn-open").addEventListener("click",
             this.handleOpen.bind(this));
-        document.getElementById("btn-import").addEventListener("click",
-            this.handleImportImage.bind(this));
+        // NOTE: Import handler registration deferred until after gImportDialog exists
+        // See initializeDeferredHandlers() method
         document.getElementById("btn-save").addEventListener("click",
             this.handleSave.bind(this));
         document.getElementById("btn-save-as").addEventListener("click",
@@ -274,6 +275,20 @@ class ImageEditor {
         //         }, 0);
         //     }
         // }
+    }
+
+    /**
+     * Initialize event handlers that depend on global objects.
+     * Must be called after all global dialogs (gSettings, gImportDialog, etc.) are created.
+     * This solves the initialization order problem where handlers reference globals
+     * that don't exist yet during ImageEditor construction.
+     */
+    initializeDeferredHandlers() {
+        // Import button handler depends on gImportDialog existing
+        document.getElementById("btn-import").addEventListener("click",
+            this.handleImportImage.bind(this));
+
+        console.log("Deferred handlers initialized");
     }
 
     //
@@ -640,86 +655,28 @@ class ImageEditor {
             return;
         }
 
-        const pickerOpts = {
-            types: [
-                {
-                    description: 'Images',
-                    accept: {
-                        'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.webp']
-                    }
-                }
-            ],
-            multiple: false
-        };
-
-        let fileHandle;
-        try {
-            if (!("showOpenFilePicker" in window)) {
-                // Fallback for older browsers
-                this.showMessage("Import feature requires a modern browser with File System Access API");
-                return;
-            }
-            [fileHandle] = await window.showOpenFilePicker(pickerOpts);
-        } catch (error) {
-            // User canceled
-            console.log(error);
-            return;
-        }
-
-        try {
-            const file = await fileHandle.getFile();
-            await this.importImageFile(file);
-        } catch(error) {
-            console.log(error);
-            this.showMessage("ERROR: import failed: " + error);
-        }
+        // Show import dialog first - user will select file from within the dialog
+        window.gImportDialog.show();
     }
 
     /**
-     * Imports and converts an image file to HGR format.
-     * @param {File} file - Image file to import
+     * Convert linear row number (0-191) to Apple II HGR interleaved memory offset.
+     * Apple II HGR memory layout: if row is ABCDEFGH, offset is pppFGHCD EABAB000
+     * @param {number} row - Linear row number (0-191)
+     * @returns {number} - Interleaved memory offset
      */
-    // Convert linear row number (0-191) to Apple II HGR interleaved memory offset
-    // Apple II HGR memory layout: if row is ABCDEFGH, offset is pppFGHCD EABAB000
     rowToHgrOffset(row) {
         const low = ((row & 0xc0) >> 1) | ((row & 0xc0) >> 3) | ((row & 0x08) << 4);
         const high = ((row & 0x07) << 2) | ((row & 0x30) >> 4);
         return (high << 8) | low;
     }
 
-    async importImageFile(file) {
-        // Show progress message
-        this.showMessage(`Importing ${file.name}...`);
-
-        // Load image into HTMLImageElement
-        const img = new Image();
-        const url = URL.createObjectURL(file);
-
-        await new Promise((resolve, reject) => {
-            img.onload = () => {
-                URL.revokeObjectURL(url);
-                resolve();
-            };
-            img.onerror = () => {
-                URL.revokeObjectURL(url);
-                reject(new Error("Failed to load image"));
-            };
-            img.src = url;
-        });
-
-        // Convert to HGR using Viterbi dithering with progress updates
-        const ditherer = new ImageDither();
-
-        // Progress callback to update UI during import
-        const progressCallback = (completed, total) => {
-            const percent = Math.round((completed / total) * 100);
-            this.showMessage(`Importing ${file.name}... ${percent}%`);
-        };
-
-        // Use async version to avoid blocking UI
-        // Hybrid algorithm: greedy byte-by-byte with error diffusion (working baseline)
-        const linearScreenData = await ditherer.ditherToHgrAsync(img, 40, 192, "hybrid", progressCallback);
-
+    /**
+     * Create a Picture from linear HGR screen data (called by ImportDialog).
+     * @param {Uint8Array} linearScreenData - Linear HGR screen data (row 0, row 1, etc.)
+     * @param {string} originalFilename - Original image filename
+     */
+    async createPictureFromLinearData(linearScreenData, originalFilename) {
         // Apple II HGR uses an interleaved scanline layout, not sequential
         // We need to convert from linear (row 0, row 1, row 2...) to interleaved format
         // The interleaved format requires 8192 bytes because row offsets go up to ~0x1FF8
@@ -741,7 +698,7 @@ class ImageEditor {
         hgrData.set(signature, 121);
 
         // Create a new picture with the converted data
-        const baseName = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
+        const baseName = originalFilename.replace(/\.[^/.]+$/, ""); // Remove extension
         const hgrName = `${baseName}.hgr`;
 
         // Picture constructor: (name, type, fileHandle, arrayBuffer)
@@ -752,7 +709,7 @@ class ImageEditor {
         this.setInitialScale(picture);
         this.switchToPicture(picture);
 
-        this.showMessage(`Imported '${file.name}' as '${hgrName}'`);
+        this.showMessage(`Imported '${originalFilename}' as '${hgrName}'`);
     }
 
     //
@@ -1918,7 +1875,17 @@ const gTextEntry = new TextEntry(imgEdit);
 
 // Initialize settings dialog.
 const gSettings = new Settings(imgEdit);
+// Expose gSettings to window before creating ImportDialog (which needs it).
+window.gSettings = gSettings;
 // Configure defaults.
 gColorPickerHgr.colorSwatchClose = gSettings.colorSwatchClose;
 
 const gAbout = new About();
+
+// Initialize import dialog (depends on window.gSettings being set).
+const gImportDialog = new ImportDialog(imgEdit);
+// Expose gImportDialog to window for handler access.
+window.gImportDialog = gImportDialog;
+
+// Initialize handlers that depend on globals (must be after all globals created).
+imgEdit.initializeDeferredHandlers();

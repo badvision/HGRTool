@@ -35,6 +35,18 @@ export default class Settings {
     get renderMode() { return localStorage.renderMode; }
     set renderMode(value) { localStorage.renderMode = value; }
 
+    // NTSC adjustment settings for import
+    get ntscHueAdjust() { return parseFloat(localStorage.ntscHueAdjust) || 0; }
+    set ntscHueAdjust(value) { localStorage.ntscHueAdjust = value.toString(); }
+    get ntscBrightnessAdjust() { return parseFloat(localStorage.ntscBrightnessAdjust) || 0; }
+    set ntscBrightnessAdjust(value) { localStorage.ntscBrightnessAdjust = value.toString(); }
+    get ntscContrastAdjust() { return parseFloat(localStorage.ntscContrastAdjust) || 0; }
+    set ntscContrastAdjust(value) { localStorage.ntscContrastAdjust = value.toString(); }
+
+    // Viterbi beam width setting (default K=4)
+    get beamWidth() { return parseInt(localStorage.beamWidth) || 4; }
+    set beamWidth(value) { localStorage.beamWidth = value.toString(); }
+
     constructor(mainObj) {
         if (Settings.isInitialized != false) {
             throw new Error("Settings initialized twice");

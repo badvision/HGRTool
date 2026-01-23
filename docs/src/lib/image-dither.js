@@ -738,9 +738,11 @@ export default class ImageDither {
      * @param {number} targetHeight - Target height (192 for HGR)
      * @param {string} algorithm - Dithering algorithm: "hybrid" (default), "threshold", "viterbi", "greedy", "greedy-parallel", "viterbi-byte", "structure-aware"
      * @param {Function} progressCallback - Optional callback(completed, total) for progress updates
+     * @param {number} beamWidth - Beam width for Viterbi algorithms (default 4)
+     * @param {AbortSignal} signal - Optional AbortSignal for cancellation
      * @returns {Promise<Uint8Array>} - HGR screen data
      */
-    async ditherToHgrAsync(source, targetWidth, targetHeight, algorithm = "hybrid", progressCallback = null) {
+    async ditherToHgrAsync(source, targetWidth, targetHeight, algorithm = "hybrid", progressCallback = null, beamWidth = 4, signal = null) {
         // Create a canvas to work with the source image
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
@@ -801,6 +803,11 @@ export default class ImageDither {
             const BATCH_SIZE = 10; // Process 10 scanlines before yielding
 
             for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                // Check for cancellation at batch boundary
+                if (signal && signal.aborted) {
+                    throw new DOMException('Dithering cancelled', 'AbortError');
+                }
+
                 const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
 
                 // Process this batch of scanlines
@@ -811,7 +818,7 @@ export default class ImageDither {
                         y,
                         targetWidth,
                         pixelWidth,
-                        4, // beam width: K=4 for performance
+                        beamWidth, // configurable beam width (default K=4)
                         this.getTargetWithError.bind(this),
                         null, // no progress callback
                         this // pass ImageDither instance with centralized functions
@@ -855,6 +862,11 @@ export default class ImageDither {
             const BATCH_SIZE = 20; // Hybrid is faster, use larger batches
 
             for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                // Check for cancellation at batch boundary
+                if (signal && signal.aborted) {
+                    throw new DOMException('Dithering cancelled', 'AbortError');
+                }
+
                 const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
 
                 for (let y = batchStart; y < batchEnd; y++) {
@@ -930,6 +942,11 @@ export default class ImageDither {
             const MAX_HISTORY = 5; // Keep last 5 scanlines
 
             for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                // Check for cancellation at batch boundary
+                if (signal && signal.aborted) {
+                    throw new DOMException('Dithering cancelled', 'AbortError');
+                }
+
                 const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
 
                 for (let y = batchStart; y < batchEnd; y++) {
@@ -1170,7 +1187,7 @@ export default class ImageDither {
                         y,
                         targetWidth,
                         pixelWidth,
-                        4, // beam width: K=4 for performance
+                        beamWidth, // configurable beam width (default K=4)
                         this.getTargetWithError.bind(this),
                         null, // no progress callback
                         this, // pass ImageDither instance with centralized functions

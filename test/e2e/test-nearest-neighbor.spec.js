@@ -13,30 +13,60 @@ const __dirname = path.dirname(__filename);
 test.describe('Nearest-Neighbor Algorithm', () => {
     test.beforeEach(async ({ page }) => {
         await page.goto('http://localhost:8080/imgedit.html');
-        await page.waitForSelector('canvas#hgrCanvas', { timeout: 10000 });
+
+        // Wait for app to initialize and auto-create blank image
+        await page.waitForLoadState('networkidle');
+        await page.waitForSelector('#edit-surface', { state: 'visible', timeout: 5000 });
+
+        // Wait for app to fully initialize
+        await page.waitForTimeout(500);
     });
 
     test('should be available as dithering algorithm', async ({ page }) => {
-        // Import a test image first to enable the algorithm selector
-        const imagePath = path.join(__dirname, 'fixtures', 'color-bars-test.png');
+        // Create a 1x1 test PNG in base64
+        const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
 
-        // Check if the image file exists
-        if (fs.existsSync(imagePath)) {
-            const fileChooserPromise = page.waitForEvent('filechooser');
-            await page.click('button#importBtn');
-            const fileChooser = await fileChooserPromise;
-            await fileChooser.setFiles(imagePath);
+        // Set up File System Access API mock
+        await page.addInitScript((base64Data) => {
+            window.showOpenFilePicker = async function() {
+                const byteCharacters = atob(base64Data);
+                const byteNumbers = new Array(byteCharacters.length);
+                for (let i = 0; i < byteCharacters.length; i++) {
+                    byteNumbers[i] = byteCharacters.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                const blob = new Blob([byteArray], { type: 'image/png' });
+                const file = new File([blob], 'test.png', { type: 'image/png' });
 
-            // Wait for import to complete
-            await page.waitForTimeout(1000);
-        }
+                const fileHandle = {
+                    kind: 'file',
+                    name: 'test.png',
+                    getFile: async () => file
+                };
 
-        // Check algorithm selector exists and contains nearest-neighbor
-        const algorithmSelect = page.locator('select#algorithmSelect');
-        if (await algorithmSelect.isVisible()) {
-            const options = await algorithmSelect.locator('option').allTextContents();
-            expect(options.some(opt => opt.toLowerCase().includes('nearest'))).toBe(true);
-        }
+                return [fileHandle];
+            };
+        }, pngBase64);
+
+        // Reload page with mock in place
+        await page.goto('http://localhost:8080/imgedit.html');
+        await page.waitForLoadState('networkidle');
+        await page.waitForTimeout(500);
+
+        // Open import dialog
+        await page.click('#btn-import');
+        await page.waitForSelector('#import-dialog[open]', { timeout: 5000 });
+
+        // Click select file button to trigger mock and show preview section
+        await page.click('#import-select-file');
+        await page.waitForSelector('#import-preview-section', { state: 'visible', timeout: 5000 });
+
+        // Now check algorithm selector exists and contains nearest-neighbor
+        const algorithmSelect = page.locator('select#import-algorithm');
+        await expect(algorithmSelect).toBeVisible();
+
+        const options = await algorithmSelect.locator('option').allTextContents();
+        expect(options.some(opt => opt.toLowerCase().includes('nearest'))).toBe(true);
     });
 
     test('should render solid colors without dithering', async ({ page }) => {
@@ -78,7 +108,7 @@ test.describe('Nearest-Neighbor Algorithm', () => {
         }, testImage);
 
         // Basic validation: if we got here without errors, the algorithm works
-        const canvasExists = await page.locator('canvas#hgrCanvas').isVisible();
+        const canvasExists = await page.locator('canvas#edit-surface').isVisible();
         expect(canvasExists).toBe(true);
     });
 

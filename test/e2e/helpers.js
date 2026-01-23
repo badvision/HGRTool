@@ -94,13 +94,13 @@ export async function selectRenderMode(page, mode) {
 /**
  * Draw a rectangle on the canvas using Playwright's CDP-level mouse control
  * @param {import('@playwright/test').Page} page
- * @param {number} x1 - X coordinate relative to canvas (in canvas display pixels)
- * @param {number} y1 - Y coordinate relative to canvas (in canvas display pixels)
- * @param {number} x2 - X coordinate relative to canvas (in canvas display pixels)
- * @param {number} y2 - Y coordinate relative to canvas (in canvas display pixels)
+ * @param {number} x1 - X coordinate in HGR image coordinates (0-279)
+ * @param {number} y1 - Y coordinate in HGR image coordinates (0-191)
+ * @param {number} x2 - X coordinate in HGR image coordinates (0-279)
+ * @param {number} y2 - Y coordinate in HGR image coordinates (0-191)
  */
 export async function drawRectangle(page, x1, y1, x2, y2) {
-  console.log(`Drawing rectangle from (${x1}, ${y1}) to (${x2}, ${y2})`);
+  console.log(`Drawing rectangle from image coords (${x1}, ${y1}) to (${x2}, ${y2})`);
 
   const canvas = await page.locator('#edit-surface');
   const box = await canvas.boundingBox();
@@ -111,12 +111,34 @@ export async function drawRectangle(page, x1, y1, x2, y2) {
 
   console.log(`Canvas bounding box: x=${box.x}, y=${box.y}, width=${box.width}, height=${box.height}`);
 
-  // Calculate absolute viewport coordinates
-  const startX = box.x + x1;
-  const startY = box.y + y1;
-  const endX = box.x + x2;
-  const endY = box.y + y2;
+  // Get the canvas offset (where the image is positioned within the canvas)
+  // This must match the calculation in Picture.drawPicture() and getCanvasPixels()
+  const { canvasOffX, canvasOffY, scale } = await page.evaluate(() => {
+    const picture = window.imageEditor?.currentPicture;
+    if (!picture) {
+      throw new Error('imageEditor.currentPicture not found');
+    }
+    const canvas = document.getElementById('edit-surface');
+    const canvasOffX = Math.trunc((canvas.width / 2) - picture.scaledCenterX);
+    const canvasOffY = Math.trunc((canvas.height / 2) - picture.scaledCenterY);
+    return { canvasOffX, canvasOffY, scale: picture.scale };
+  });
 
+  console.log(`Canvas offset: (${canvasOffX}, ${canvasOffY}), scale: ${scale}`);
+
+  // Convert image coordinates to canvas coordinates, then to viewport coordinates
+  const startCanvasX = x1 * scale + canvasOffX;
+  const startCanvasY = y1 * scale + canvasOffY;
+  const endCanvasX = x2 * scale + canvasOffX;
+  const endCanvasY = y2 * scale + canvasOffY;
+
+  // Add canvas bounding box to get viewport coordinates
+  const startX = box.x + startCanvasX;
+  const startY = box.y + startCanvasY;
+  const endX = box.x + endCanvasX;
+  const endY = box.y + endCanvasY;
+
+  console.log(`Canvas coords: (${startCanvasX}, ${startCanvasY}) to (${endCanvasX}, ${endCanvasY})`);
   console.log(`Viewport coords: (${startX}, ${startY}) to (${endX}, ${endY})`);
 
   // Use Playwright's mouse API which properly generates pointer events
@@ -157,10 +179,10 @@ export async function takeScreenshot(page, filename) {
 /**
  * Get the canvas pixel data for analysis
  * @param {import('@playwright/test').Page} page
- * @param {number} x
- * @param {number} y
- * @param {number} width
- * @param {number} height
+ * @param {number} x - X coordinate in HGR image coordinates (0-279)
+ * @param {number} y - Y coordinate in HGR image coordinates (0-191)
+ * @param {number} width - Width in image pixels
+ * @param {number} height - Height in image pixels
  * @returns {Promise<{data: number[], width: number, height: number}>}
  */
 export async function getCanvasPixels(page, x, y, width, height) {
@@ -168,15 +190,14 @@ export async function getCanvasPixels(page, x, y, width, height) {
     const canvas = document.getElementById('edit-surface');
     const ctx = canvas.getContext('2d');
 
-    // CRITICAL FIX: The image is centered on the canvas with an offset
-    // We need to find where the actual image starts
+    // CRITICAL FIX: The image is centered on the canvas with an offset and may be scaled
+    // We need to convert HGR image coordinates to canvas coordinates
     // The Picture class centers the image using:
     //   canvasOffX = (canvas.width / 2) - scaledCenterX
     //   canvasOffY = (canvas.height / 2) - scaledCenterY
-    // For a newly created image, scaledCenterX = imageWidth/2, scaledCenterY = imageHeight/2
-    // So: canvasOffX = (canvas.width - imageWidth) / 2
+    // And scales the image by picture.scale
 
-    // Get the offset from the Picture instance (exposed as window.imageEditor.currentPicture)
+    // Get the offset and scale from the Picture instance
     const picture = window.imageEditor?.currentPicture;
     if (!picture) {
       console.error('[getCanvasPixels] imageEditor.currentPicture not found!');
@@ -186,15 +207,20 @@ export async function getCanvasPixels(page, x, y, width, height) {
     // Calculate the canvas offset the same way Picture.drawPicture() does
     const canvasOffX = Math.trunc((canvas.width / 2) - picture.scaledCenterX);
     const canvasOffY = Math.trunc((canvas.height / 2) - picture.scaledCenterY);
+    const scale = picture.scale;
 
-    console.log(`[getCanvasPixels] Canvas offset: (${canvasOffX}, ${canvasOffY})`);
-    console.log(`[getCanvasPixels] Adjusted coords: (${x + canvasOffX}, ${y + canvasOffY})`);
+    console.log(`[getCanvasPixels] Image coords: (${x}, ${y}), scale: ${scale}, offset: (${canvasOffX}, ${canvasOffY})`);
 
-    // Add offset to sampling coordinates
-    const adjustedX = x + canvasOffX;
-    const adjustedY = y + canvasOffY;
+    // Convert image coordinates to canvas coordinates
+    // canvasX = imageX * scale + offset
+    const adjustedX = Math.trunc(x * scale + canvasOffX);
+    const adjustedY = Math.trunc(y * scale + canvasOffY);
+    const adjustedWidth = Math.trunc(width * scale);
+    const adjustedHeight = Math.trunc(height * scale);
 
-    const imageData = ctx.getImageData(adjustedX, adjustedY, width, height);
+    console.log(`[getCanvasPixels] Canvas coords: (${adjustedX}, ${adjustedY}) ${adjustedWidth}x${adjustedHeight}`);
+
+    const imageData = ctx.getImageData(adjustedX, adjustedY, adjustedWidth, adjustedHeight);
 
     // Debug: Show what we got
     const firstPixel = imageData.data;

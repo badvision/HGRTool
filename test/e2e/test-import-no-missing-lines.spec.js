@@ -28,10 +28,6 @@ test.describe('Image Import - Verify No Missing Lines', () => {
   test('Imported image should have data in all 192 rows', async ({ page }) => {
     console.log('=== Test: Verify No Missing Lines After Import ===');
 
-    // Create a test image with distinct pattern for each row
-    await page.goto('/imgedit.html');
-    await waitForAppReady(page);
-
     // Create test image: 280x192 with different grayscale value per row
     const testImageDataUrl = await page.evaluate(() => {
       const canvas = document.createElement('canvas');
@@ -51,32 +47,77 @@ test.describe('Image Import - Verify No Missing Lines', () => {
       return canvas.toDataURL('image/png');
     });
 
-    // Convert data URL to buffer and save
+    // Extract base64 data from data URL
     const base64Data = testImageDataUrl.replace(/^data:image\/png;base64,/, '');
-    const buffer = Buffer.from(base64Data, 'base64');
-    const testImagePath = path.join('/tmp', 'test-gradient-192.png');
-    fs.writeFileSync(testImagePath, buffer);
-    console.log(`Test gradient image created at: ${testImagePath}`);
+    console.log(`Test gradient image created (${base64Data.length} bytes base64)`);
 
-    // Set up file chooser handler
-    const fileChooserPromise = page.waitForEvent('filechooser');
+    // Set up File System Access API mock before navigating
+    await page.addInitScript((base64Data) => {
+      window.showOpenFilePicker = async function() {
+        // Convert base64 to Blob
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: 'image/png' });
 
-    // Click import button
+        // Create a File object
+        const file = new File([blob], 'test-gradient-192.png', { type: 'image/png' });
+
+        // Mock FileSystemFileHandle
+        const fileHandle = {
+          kind: 'file',
+          name: 'test-gradient-192.png',
+          getFile: async () => file
+        };
+
+        return [fileHandle];
+      };
+    }, base64Data);
+
+    // Now navigate to the page
+    await page.goto('/imgedit.html');
+    await waitForAppReady(page);
+
+    // Click import button to open dialog
     console.log('Clicking Import button...');
     await page.click('#btn-import');
 
-    // Wait for file chooser
-    let fileChooser;
+    // Wait for import dialog to open
+    console.log('Waiting for import dialog...');
+    await page.waitForSelector('#import-dialog[open]', { timeout: 5000 });
+    console.log('Import dialog opened!');
+
+    // Click select file button in dialog (this will trigger the mocked API)
+    console.log('Clicking Select File button...');
+    await page.click('#import-select-file');
+
     try {
-      fileChooser = await fileChooserPromise;
-      console.log('File chooser appeared!');
+      console.log('Waiting for preview section...');
 
-      // Select the test image
-      await fileChooser.setFiles(testImagePath);
-      console.log('File selected');
+      // Wait for preview section to appear
+      await page.waitForSelector('#import-preview-section', { state: 'visible', timeout: 5000 });
+      console.log('Preview section visible!');
 
-      // Wait for import to complete
-      await page.waitForTimeout(2000);
+      // Click Convert button to complete import
+      console.log('Clicking Convert button...');
+      await page.click('#import-convert');
+
+      // Wait for import to complete and dialog to close (not have open attribute)
+      await page.waitForFunction(() => {
+        const dialog = document.getElementById('import-dialog');
+        return !dialog.hasAttribute('open');
+      }, { timeout: 10000 });
+      console.log('Import dialog closed!');
+
+      // Wait for processing to complete and image to be loaded
+      await page.waitForTimeout(1000);
+
+      // Wait for thumbnail to appear in the image list
+      await page.waitForSelector('#rightbar .right-pic', { timeout: 5000 });
+      console.log('Thumbnail appeared in image list!');
 
       // Take screenshot of imported image
       await takeScreenshot(page, 'import-gradient-complete.png');
@@ -85,11 +126,11 @@ test.describe('Image Import - Verify No Missing Lines', () => {
       const verification = await page.evaluate(() => {
         // Get the current picture
         const editor = window.imageEditor;
-        if (!editor || !editor.picture) {
+        if (!editor || !editor.currentPicture) {
           return { error: 'No picture loaded' };
         }
 
-        const picture = editor.picture;
+        const picture = editor.currentPicture;
         const hgrData = new Uint8Array(picture.binaryData);
 
         // HGR file format: 7680 bytes screen data at start
@@ -176,11 +217,6 @@ test.describe('Image Import - Verify No Missing Lines', () => {
 
       await takeScreenshot(page, 'import-verification-failed.png');
       throw e;
-    } finally {
-      // Cleanup
-      if (fs.existsSync(testImagePath)) {
-        fs.unlinkSync(testImagePath);
-      }
     }
   });
 });
