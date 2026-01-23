@@ -159,7 +159,13 @@ export default class ImageDither {
             // Extract 7-bit pattern for NTSC lookup
             // Need to include context from previous bits for proper color rendering
             let pattern;
-            if (bitPos === 6) {
+            if (bitPos === 0) {
+                // First pixel: extract pattern spanning previous and current byte
+                // We need bits 12-13 from previous byte region and bits 14-18 from current byte region
+                const bitsFromPrev = (dhgrBits >> 12) & 0x03;     // 2 bits (12-13) from prevByte region
+                const bitsFromCurrent = (dhgrBits >> 14) & 0x1F;  // 5 bits (14-18) from currByte region
+                pattern = (bitsFromPrev | (bitsFromCurrent << 2)) & 0x7F;
+            } else if (bitPos === 6) {
                 // Last pixel: extract pattern spanning current and next byte
                 // We need bits 23-27 from current byte and bits 0-1 from next byte
                 const bitsFromCurrent = (dhgrBits >> 23) & 0x1F; // 5 bits (23-27)
@@ -215,9 +221,10 @@ export default class ImageDither {
      * @param {number} prevByte - Previous byte in scanline
      * @param {Array<{r, g, b}>} targetColors - Target colors for 7 pixels
      * @param {number} xPos - Byte position in scanline (0-39)
+     * @param {number} nextByte - Next byte in scanline (optional, defaults to 0x00)
      * @returns {number} - Best byte value (0-255)
      */
-    findBestBytePattern(prevByte, targetColors, xPos) {
+    findBestBytePattern(prevByte, targetColors, xPos, nextByte = 0x00) {
         let bestByte = 0;
         let leastError = Infinity;
 
@@ -225,7 +232,7 @@ export default class ImageDither {
         // This is the ONLY way to guarantee finding the global optimum
         // because NTSC bit patterns are highly interdependent
         for (let byte = 0; byte < 256; byte++) {
-            const error = this.calculateNTSCError(prevByte, byte, targetColors, xPos);
+            const error = this.calculateNTSCError(prevByte, byte, targetColors, xPos, nextByte);
             if (error < leastError) {
                 leastError = error;
                 bestByte = byte;
@@ -253,10 +260,16 @@ export default class ImageDither {
             // Same logic as calculateNTSCError: extract from current byte region
             const dhgrStartBit = 14 + (bitPos * 2);
 
-            // For the last pixel (bitPos=6), we need bits from the next byte too
+            // For the first and last pixels, we need bits from adjacent bytes
             let pattern;
-            if (bitPos === 6) {
-                // Extract pattern spanning current and next byte
+            if (bitPos === 0) {
+                // First pixel: extract pattern spanning previous and current byte
+                // We need bits 12-13 from previous byte region and bits 14-18 from current byte region
+                const bitsFromPrev = (dhgrBits >> 12) & 0x03;     // 2 bits (12-13) from prevByte region
+                const bitsFromCurrent = (dhgrBits >> 14) & 0x1F;  // 5 bits (14-18) from currByte region
+                pattern = (bitsFromPrev | (bitsFromCurrent << 2)) & 0x7F;
+            } else if (bitPos === 6) {
+                // Last pixel: extract pattern spanning current and next byte
                 // We need bits 23-27 from current byte and bits 0-1 from next byte
                 const bitsFromCurrent = (dhgrBits >> 23) & 0x1F; // 5 bits (23-27)
                 const bitsFromNext = dhgrBitsNext & 0x03; // 2 bits (0-1)
@@ -378,18 +391,27 @@ export default class ImageDither {
     }
 
     /**
-     * Performs improved hybrid dithering for a single scanline.
-     * Uses bit-by-bit optimization in findBestBytePattern.
+     * Performs improved hybrid dithering for a single scanline with two-pass optimization.
+     *
+     * TWO-PASS ARCHITECTURE:
+     * Pass 1: Sequential optimization with nextByte=0x00 (traditional approach)
+     * Pass 2: Re-optimize using actual nextByte from Pass 1 results
+     *
+     * This fixes bit 6 (last pixel) byte boundary artifacts by using correct
+     * nextByte context for NTSC pattern extraction and color rendering.
+     *
      * @param {Uint8ClampedArray} pixels - Source pixel data
      * @param {Array} errorBuffer - Error accumulation buffer [y][x] = [r, g, b]
      * @param {number} y - Y position (0-191)
      * @param {number} targetWidth - Width in bytes (40)
      * @param {number} pixelWidth - Width in pixels (280)
+     * @param {boolean} enableTwoPass - Enable two-pass optimization (default: false)
      * @returns {Uint8Array} - Scanline data (40 bytes)
      */
-    ditherScanlineHybrid(pixels, errorBuffer, y, targetWidth, pixelWidth) {
+    ditherScanlineHybrid(pixels, errorBuffer, y, targetWidth, pixelWidth, enableTwoPass = false) {
         const scanline = new Uint8Array(targetWidth);
 
+        // PASS 1: Sequential optimization (nextByte defaults to 0x00)
         for (let byteX = 0; byteX < targetWidth; byteX++) {
             // Get target colors with accumulated error
             const target = this.getTargetWithError(pixels, errorBuffer, byteX, y, pixelWidth);
@@ -422,6 +444,62 @@ export default class ImageDither {
 
             // Propagate quantization error Floyd-Steinberg style
             this.propagateErrorToBuffer(errorBuffer, byteX, y, target, rendered, pixelWidth);
+        }
+
+        if (!enableTwoPass) {
+            return scanline;
+        }
+
+        // EXPERIMENTAL: Two-pass optimization to fix bit 6 boundary artifacts.
+        // Currently disabled by default due to instability with error diffusion.
+        // Can be enabled with enableTwoPass=true for testing.
+        //
+        // PASS 2: Refinement with actual nextByte from Pass 1 results
+        // Create fresh error buffer for Pass 2 to avoid error accumulation issues
+        const pass2ErrorBuffer = new Array(errorBuffer.length);
+        for (let i = 0; i < errorBuffer.length; i++) {
+            if (errorBuffer[i]) {
+                pass2ErrorBuffer[i] = new Array(errorBuffer[i].length);
+                for (let j = 0; j < errorBuffer[i].length; j++) {
+                    if (errorBuffer[i][j]) {
+                        pass2ErrorBuffer[i][j] = [...errorBuffer[i][j]];
+                    }
+                }
+            }
+        }
+
+        for (let byteX = 0; byteX < targetWidth; byteX++) {
+            // Get target colors with accumulated error from Pass 2 buffer
+            const target = this.getTargetWithError(pixels, pass2ErrorBuffer, byteX, y, pixelWidth);
+
+            const prevByte = byteX > 0 ? scanline[byteX - 1] : 0x00;
+            const nextByte = byteX < targetWidth - 1 ? scanline[byteX + 1] : 0x00;
+
+            // Re-optimize with correct nextByte context
+            let bestByte = scanline[byteX];
+            let leastError = Infinity;
+
+            for (let byte = 0; byte < 256; byte++) {
+                const error = this.calculateNTSCError(prevByte, byte, target, byteX, nextByte);
+                if (error < leastError) {
+                    leastError = error;
+                    bestByte = byte;
+                }
+            }
+
+            // Update if refinement found better byte
+            scanline[byteX] = bestByte;
+
+            // Error propagation with Pass 2 context (uses actual nextByte)
+            const rendered = this.renderNTSCColors(prevByte, bestByte, byteX, nextByte);
+            this.propagateErrorToBuffer(pass2ErrorBuffer, byteX, y, target, rendered, pixelWidth);
+        }
+
+        // Commit Pass 2 error state back to main buffer
+        for (let i = 0; i < errorBuffer.length; i++) {
+            if (pass2ErrorBuffer[i]) {
+                errorBuffer[i] = pass2ErrorBuffer[i];
+            }
         }
 
         return scanline;
