@@ -615,19 +615,13 @@ export default class ImageDither {
 
         } else if (algorithm === "nearest-neighbor") {
             // Nearest-neighbor quantization (no error diffusion)
-            const renderer = new NTSCRenderer();
-            const imageData = new ImageData(560, 1);
-            const hgrBytes = new Uint8Array(40);
-
             for (let y = 0; y < targetHeight; y++) {
                 const scanline = nearestNeighborDitherScanline(
                     pixels,
                     y,
                     targetWidth,
                     pixelWidth,
-                    renderer,
-                    imageData,
-                    hgrBytes
+                    this
                 );
                 screen.set(scanline, y * targetWidth);
             }
@@ -646,9 +640,7 @@ export default class ImageDither {
                     y,
                     targetWidth,
                     pixelWidth,
-                    renderer,
-                    imageData,
-                    hgrBytes
+                    this
                 );
                 firstPass.set(scanline, y * targetWidth);
             }
@@ -1054,10 +1046,6 @@ export default class ImageDither {
 
         } else if (algorithm === "nearest-neighbor") {
             // Nearest-neighbor quantization (no error diffusion) - async version
-            const renderer = new NTSCRenderer();
-            const imageData = new ImageData(560, 1);
-            const hgrBytes = new Uint8Array(40);
-
             const BATCH_SIZE = 10; // Process 10 scanlines before yielding
 
             for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
@@ -1069,9 +1057,7 @@ export default class ImageDither {
                         y,
                         targetWidth,
                         pixelWidth,
-                        renderer,
-                        imageData,
-                        hgrBytes
+                        this
                     );
                     screen.set(scanline, y * targetWidth);
                 }
@@ -1104,9 +1090,7 @@ export default class ImageDither {
                         y,
                         targetWidth,
                         pixelWidth,
-                        renderer,
-                        imageData,
-                        hgrBytes
+                        this
                     );
                     firstPass.set(scanline, y * targetWidth);
                 }
