@@ -41,18 +41,16 @@ export async function selectColor(page, colorName) {
   await page.waitForSelector('#color-picker-hgr[open]', { state: 'visible' });
 
   // Map color names to button indices (0-based)
-  // Based on getSolidPatterns() in std-hi-res.js:
-  // 0: 0x00 (black), 1: 0x2a (green), 2: 0x55 (purple/magenta), 3: 0x7f (orange),
-  // 4: 0x1000 (HI_BIT_CLEAR gradient), 5: 0x80 (blue), 6: 0xaa (white),
-  // 7: 0xd5 (white), 8: 0xff (white), 9: 0x1001 (HI_BIT_SET gradient)
+  // Actual color picker layout (verified by drawing test):
+  // 0=black, 1=green, 2=purple, 3=white, 4=black, 5=orange, 6=blue, 7=white, 8-9=gradients
   const colorMap = {
     'black': 0,
     'green': 1,
     'purple': 2,
     'magenta': 2,
-    'orange': 3,
-    'blue': 5,
-    'white': 6,
+    'white': 3,
+    'orange': 5,
+    'blue': 6,
   };
 
   const buttonIndex = colorMap[colorName];
