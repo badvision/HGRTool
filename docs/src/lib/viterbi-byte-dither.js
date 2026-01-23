@@ -169,9 +169,10 @@ function calculateByteErrorWithColors(prevByte, candidateByte, targetColors, byt
  * BEAM WIDTH STRATEGY:
  * - Always test greedy suggestion (if available) as first candidate
  * - Test evenly-spaced candidates across the 0-255 range to ensure coverage
- * - Beam width range: 1-16 (UI default is 4)
+ * - Beam width range: 1-256 (UI default is 16)
  * - Lower beam width = faster but potentially lower quality
  * - Higher beam width = slower but better quality
+ * - Beam width 256 = exhaustive search (tests all byte values)
  *
  * GREEDY PRE-FILL GUIDANCE: Uses greedy result as a hint about what byte value would
  * work well in this position. Adds a penalty for deviating from the greedy value,
@@ -189,7 +190,7 @@ function calculateByteErrorWithColors(prevByte, candidateByte, targetColors, byt
  * @param {ImageDither} imageDither - ImageDither instance for NTSC calculations
  * @param {Uint8Array} greedyPreFill - Optional greedy scanline for guidance
  * @param {Uint8Array} scanlineSoFar - Optional partial scanline with committed bytes
- * @param {number} beamWidth - Maximum number of candidates to test (default 16, range 1-16)
+ * @param {number} beamWidth - Maximum number of candidates to test (default 16, range 1-256)
  * @returns {{byte: number, renderedColors: Array<{r,g,b}>}} - Best byte and its rendered colors
  */
 function findBestByteViterbi(prevByte, targetColors, byteX, imageDither, greedyPreFill = null, scanlineSoFar = null, beamWidth = 16) {
@@ -227,31 +228,38 @@ function findBestByteViterbi(prevByte, targetColors, byteX, imageDither, greedyP
     // but not so large that it prevents beneficial deviations
     const greedyDeviationPenalty = 5000;
 
-    // Build candidate list based on beam width (range 1-16)
+    // Build candidate list based on beam width (range 1-256)
     const candidates = new Set();
 
-    // Always test greedy suggestion first (if available) - this is our best hint
-    if (greedySuggestion !== null) {
-        candidates.add(greedySuggestion);
-    }
+    // If beam width >= 256, test all bytes exhaustively
+    if (beamWidth >= 256) {
+        for (let byte = 0; byte < 256; byte++) {
+            candidates.add(byte);
+        }
+    } else {
+        // Always test greedy suggestion first (if available) - this is our best hint
+        if (greedySuggestion !== null) {
+            candidates.add(greedySuggestion);
+        }
 
-    // Always test extremes (0 and 255) for better coverage
-    candidates.add(0);
-    candidates.add(255);
+        // Always test extremes (0 and 255) for better coverage
+        candidates.add(0);
+        candidates.add(255);
 
-    // Sample evenly across 0-255 range for diversity
-    // This ensures we explore different regions of the byte space
-    const step = Math.floor(256 / (beamWidth + 1));
-    for (let i = 1; candidates.size < beamWidth && i < 256; i++) {
-        const byte = Math.min(255, i * step);
-        candidates.add(byte);
-    }
+        // Sample evenly across 0-255 range for diversity
+        // This ensures we explore different regions of the byte space
+        const step = Math.floor(256 / (beamWidth + 1));
+        for (let i = 1; candidates.size < beamWidth && i < 256; i++) {
+            const byte = Math.min(255, i * step);
+            candidates.add(byte);
+        }
 
-    // Fill remaining slots with random sampling if needed
-    // (shouldn't happen often with the even sampling, but ensures we hit beamWidth)
-    while (candidates.size < beamWidth) {
-        const randomByte = Math.floor(Math.random() * 256);
-        candidates.add(randomByte);
+        // Fill remaining slots with random sampling if needed
+        // (shouldn't happen often with the even sampling, but ensures we hit beamWidth)
+        while (candidates.size < beamWidth) {
+            const randomByte = Math.floor(Math.random() * 256);
+            candidates.add(randomByte);
+        }
     }
 
     // Test all candidates
@@ -399,9 +407,10 @@ function distributeByteError(errorBuffer, byteX, y, targetColors, renderedColors
  * - Prevents poor local decisions by biasing toward globally sensible values
  *
  * Beam width controls the quality/speed tradeoff:
- * - Lower beam width (e.g., 4) = faster, tests fewer candidates
- * - Higher beam width (e.g., 16) = slower, tests more candidates for better quality
- * - Range: 1-16 (UI default is 4)
+ * - Lower beam width (e.g., 16) = faster, tests fewer candidates
+ * - Higher beam width (e.g., 128) = slower, tests more candidates for better quality
+ * - Beam width 256 = exhaustive search (tests all byte values)
+ * - Range: 1-256 (UI default is 16)
  *
  * @param {Uint8ClampedArray} pixels - Source pixel data
  * @param {Array} errorBuffer - Error buffer (flat array)
@@ -410,7 +419,7 @@ function distributeByteError(errorBuffer, byteX, y, targetColors, renderedColors
  * @param {number} pixelWidth - Width in pixels (280)
  * @param {number} height - Height in pixels (192)
  * @param {ImageDither} imageDither - ImageDither instance for NTSC calculations
- * @param {number} beamWidth - Maximum candidates to test per byte (default 16, range 1-16)
+ * @param {number} beamWidth - Maximum candidates to test per byte (default 16, range 1-256)
  * @returns {Uint8Array} - Scanline data (40 bytes)
  */
 export function viterbiByteDither(pixels, errorBuffer, y, targetWidth, pixelWidth, height, imageDither, beamWidth = 16) {

@@ -307,7 +307,7 @@ export class ImportDialog {
      * Access global Settings singleton directly (matches existing pattern).
      */
     loadSettings() {
-        const beamWidth = window.gSettings.beamWidth || 4;
+        const beamWidth = window.gSettings.beamWidth || 16;
         const hue = window.gSettings.ntscHueAdjust || 0;
         const saturation = window.gSettings.ntscSaturationAdjust || 0;
         const brightness = window.gSettings.ntscBrightnessAdjust || 0;
@@ -388,9 +388,9 @@ export class ImportDialog {
         this.algorithmSelect.value = 'greedy';
 
         // Reset all sliders to defaults
-        this.beamWidthSlider.value = 4;
-        this.beamWidthValue.textContent = 'K=4';
-        window.gSettings.beamWidth = 4;
+        this.beamWidthSlider.value = 16;
+        this.beamWidthValue.textContent = 'K=16';
+        window.gSettings.beamWidth = 16;
 
         this.hueSlider.value = 0;
         this.hueValue.textContent = '0';
