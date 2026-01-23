@@ -517,7 +517,7 @@ export default class Picture {
         return this.undoContext !== undefined;
     }
 
-    undoAction() {
+    undoAction(mode = 'rgb') {
         if (this.undoIndex === 0) {
             console.log("no actions to undo");
             return false;
@@ -526,11 +526,11 @@ export default class Picture {
         this.undoIndex--;
         let undoBuf = undoItem.generateUndo(this.rawImage.rawData);
         this.rawImage.rawData = undoBuf;
-        this.render();
+        this.render(mode);
         return true;
     }
 
-    redoAction() {
+    redoAction(mode = 'rgb') {
         if (this.undoIndex === this.undoList.length) {
             console.log("no actions to redo");
             return false;
@@ -539,7 +539,7 @@ export default class Picture {
         this.undoIndex++;
         let redoBuf = redoItem.generateRedo(this.rawImage.rawData);
         this.rawImage.rawData = redoBuf;
-        this.render();
+        this.render(mode);
         return true;
     }
 

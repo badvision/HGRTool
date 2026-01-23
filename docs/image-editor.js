@@ -925,7 +925,7 @@ class ImageEditor {
     handleUndo() {
         this.clearClipping();
         if (this.currentPicture !== undefined) {
-            if (this.currentPicture.undoAction()) {
+            if (this.currentPicture.undoAction(gSettings.renderMode)) {
                 this.drawCurrentPicture();
             }
         }
@@ -934,7 +934,7 @@ class ImageEditor {
     handleRedo() {
         this.clearClipping();
         if (this.currentPicture !== undefined) {
-            if (this.currentPicture.redoAction()) {
+            if (this.currentPicture.redoAction(gSettings.renderMode)) {
                 this.drawCurrentPicture();
             }
         }
