@@ -73,9 +73,13 @@ export class FileInputHandler {
      * @param {File} file - Image file to load
      * @param {number} width - Target width for ImageData
      * @param {number} height - Target height for ImageData
+     * @param {boolean} maintainAspect - If true, letterbox/pillarbox to preserve aspect ratio.
+     *   Apple II HGR pixels are ~2x taller than wide, so the effective square-pixel display is
+     *   (width*2) x (height*2) — e.g. 560x384 for a 280x192 target.  The source image is scaled
+     *   to fit within that square-pixel envelope, then the result is centered with black borders.
      * @returns {Promise<ImageData>} - Loaded and scaled ImageData
      */
-    static async loadImageAsImageData(file, width, height) {
+    static async loadImageAsImageData(file, width, height, maintainAspect = false) {
         // Validate file first
         const validation = this.validateImageFile(file);
         if (!validation.valid) {
@@ -106,7 +110,24 @@ export class FileInputHandler {
             const ctx = canvas.getContext('2d');
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = "high";
-            ctx.drawImage(img, 0, 0, width, height);
+
+            if (maintainAspect) {
+                // Apple II HGR pixels are ~2x taller, so the square-pixel display envelope
+                // is (width*2) x (height*2).  Scale source to fit inside that envelope, then
+                // map back to HGR pixels (divide by 2) and center with black borders.
+                const displayW = width * 2;
+                const displayH = height * 2;
+                const scale = Math.min(displayW / img.naturalWidth, displayH / img.naturalHeight);
+                const dw = Math.round(img.naturalWidth  * scale / 2);
+                const dh = Math.round(img.naturalHeight * scale / 2);
+                const dx = Math.round((width  - dw) / 2);
+                const dy = Math.round((height - dh) / 2);
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, width, height);
+                ctx.drawImage(img, dx, dy, dw, dh);
+            } else {
+                ctx.drawImage(img, 0, 0, width, height);
+            }
 
             return ctx.getImageData(0, 0, width, height);
         } catch (error) {

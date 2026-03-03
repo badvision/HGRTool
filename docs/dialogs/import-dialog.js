@@ -134,6 +134,8 @@ export class ImportDialog {
         this.contrastSlider = document.getElementById('import-contrast');
         this.contrastValue = document.getElementById('import-contrast-value');
 
+        this.aspectRatioCheckbox = document.getElementById('import-aspect-ratio');
+
         this.convertButton = document.getElementById('import-convert');
         this.cancelButton = document.getElementById('import-cancel');
         this.cancelNoFileButton = document.getElementById('import-cancel-no-file');
@@ -237,6 +239,13 @@ export class ImportDialog {
         // Algorithm dropdown
         this.algorithmSelect.addEventListener('change', () => {
             this.debouncedPreviewUpdate();
+        });
+
+        // Aspect ratio checkbox — re-loads the source image with new scaling
+        this.aspectRatioCheckbox.addEventListener('change', async () => {
+            if (this.originalFile) {
+                await this.processImageFile(this.originalFile);
+            }
         });
 
         // Convert button
@@ -449,8 +458,10 @@ export class ImportDialog {
                 return;
             }
 
-            // Load image at HGR resolution (280x192)
-            const imageData = await FileInputHandler.loadImageAsImageData(file, 280, 192);
+            // Load image at HGR resolution (280x192), optionally preserving aspect ratio
+            const imageData = await FileInputHandler.loadImageAsImageData(
+                file, 280, 192, this.aspectRatioCheckbox.checked
+            );
 
             // Show preview with the loaded image
             this.showWithImage(imageData, file);

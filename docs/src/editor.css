@@ -797,6 +797,12 @@ label {
     align-items: center;
 }
 
+.import-checkbox-label {
+    justify-content: flex-start !important;
+    gap: 8px;
+    cursor: pointer;
+}
+
 .import-select {
     width: 100%;
     padding: 4px 8px;

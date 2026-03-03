@@ -33,6 +33,7 @@ import { viterbiByteDither } from "./viterbi-byte-dither.js";
 import { nearestNeighborDitherScanline } from "./nearest-neighbor-dither.js";
 import { secondPassDitherScanline } from "./nearest-neighbor-second-pass.js";
 import { generateStructureHints } from "./structure-hints.js";
+import { buckelsDitherScanline } from "./buckels-dither.js";
 
 //
 // Dithering engine for image-to-HGR conversion.
@@ -158,29 +159,24 @@ export default class ImageDither {
 
             // Extract 7-bit pattern for NTSC lookup
             // Need to include context from previous bits for proper color rendering
+            // Extract 7-bit pattern centered on the first DHGR dot of this HGR pixel.
+            // Normal case: window = dhgrBits[dhgrStartBit-3 .. dhgrStartBit+3].
+            // bitPos=6 needs 2 bits from the next byte's expansion (bits 14-15 of
+            // hgrToDhgr[currByte][nextByte], not bits 0-1 which are currByte's own dots).
             let pattern;
-            if (bitPos === 0) {
-                // First pixel: extract pattern spanning previous and current byte
-                // We need bits 12-13 from previous byte region and bits 14-18 from current byte region
-                const bitsFromPrev = (dhgrBits >> 12) & 0x03;     // 2 bits (12-13) from prevByte region
-                const bitsFromCurrent = (dhgrBits >> 14) & 0x1F;  // 5 bits (14-18) from currByte region
-                pattern = (bitsFromPrev | (bitsFromCurrent << 2)) & 0x7F;
-            } else if (bitPos === 6) {
-                // Last pixel: extract pattern spanning current and next byte
-                // We need bits 23-27 from current byte and bits 0-1 from next byte
-                const bitsFromCurrent = (dhgrBits >> 23) & 0x1F; // 5 bits (23-27)
-                const bitsFromNext = dhgrBitsNext & 0x03; // 2 bits (0-1)
+            if (bitPos === 6) {
+                const bitsFromCurrent = (dhgrBits >> 23) & 0x1F;       // bits 23-27
+                const bitsFromNext = (dhgrBitsNext >> 14) & 0x03;       // first 2 dots of nextByte
                 pattern = (bitsFromCurrent | (bitsFromNext << 5)) & 0x7F;
             } else {
-                // Normal extraction within current byte
+                // Covers bitPos 0-5; for bitPos=0 this naturally uses bits 11-17,
+                // giving correct left-context from prevByte (bits 11-13) and right-
+                // context from currByte (bits 14-17).
                 pattern = (dhgrBits >> (dhgrStartBit - 3)) & 0x7F;
             }
 
-            // Phase calculation: NTSC repeats every 4 DHGR pixels
-            // Each HGR pixel = 2 DHGR pixels, so phase = (hgrPixel * 2) % 4
-            // Subtract 1 to align with NTSC renderer phase
             const pixelX = xPos * 7 + bitPos;
-            const phase = ((pixelX * 2) + 3) % 4;  // +3 mod 4 = -1
+            const phase = ((pixelX * 2) + 3) % 4;  // +3 mod 4 = -1 to align with renderer
 
             // Get actual NTSC-rendered color from pre-computed palette
             const ntscColor = NTSCRenderer.solidPalette[phase][pattern];
@@ -260,22 +256,12 @@ export default class ImageDither {
             // Same logic as calculateNTSCError: extract from current byte region
             const dhgrStartBit = 14 + (bitPos * 2);
 
-            // For the first and last pixels, we need bits from adjacent bytes
             let pattern;
-            if (bitPos === 0) {
-                // First pixel: extract pattern spanning previous and current byte
-                // We need bits 12-13 from previous byte region and bits 14-18 from current byte region
-                const bitsFromPrev = (dhgrBits >> 12) & 0x03;     // 2 bits (12-13) from prevByte region
-                const bitsFromCurrent = (dhgrBits >> 14) & 0x1F;  // 5 bits (14-18) from currByte region
-                pattern = (bitsFromPrev | (bitsFromCurrent << 2)) & 0x7F;
-            } else if (bitPos === 6) {
-                // Last pixel: extract pattern spanning current and next byte
-                // We need bits 23-27 from current byte and bits 0-1 from next byte
-                const bitsFromCurrent = (dhgrBits >> 23) & 0x1F; // 5 bits (23-27)
-                const bitsFromNext = dhgrBitsNext & 0x03; // 2 bits (0-1)
+            if (bitPos === 6) {
+                const bitsFromCurrent = (dhgrBits >> 23) & 0x1F;
+                const bitsFromNext = (dhgrBitsNext >> 14) & 0x03;  // first 2 dots of nextByte
                 pattern = (bitsFromCurrent | (bitsFromNext << 5)) & 0x7F;
             } else {
-                // Normal extraction within current byte
                 pattern = (dhgrBits >> (dhgrStartBit - 3)) & 0x7F;
             }
 
@@ -816,6 +802,25 @@ export default class ImageDither {
                 }
             }
 
+        } else if (algorithm === "buckels") {
+            // Buckels 3-pass palette-optimal dithering (from bmp2dhr by Bill Buckels).
+            // For each scanline: test both hi-bit palettes independently, choose the
+            // palette that minimises per-byte NTSC error, then do the real dither.
+            const errorBuffer = new Array(targetHeight);
+            for (let y = 0; y < targetHeight; y++) {
+                errorBuffer[y] = new Array(pixelWidth);
+                for (let x = 0; x < pixelWidth; x++) {
+                    errorBuffer[y][x] = [0, 0, 0];
+                }
+            }
+
+            for (let y = 0; y < targetHeight; y++) {
+                const scanline = buckelsDitherScanline(
+                    pixels, errorBuffer, y, targetWidth, pixelWidth, this
+                );
+                screen.set(scanline, y * targetWidth);
+            }
+
         } else {
             throw new Error(`Unknown dithering algorithm: ${algorithm}`);
         }
@@ -1293,6 +1298,41 @@ export default class ImageDither {
                 }
 
                 // Yield to event loop to keep UI responsive
+                if (batchEnd < targetHeight) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+
+        } else if (algorithm === "buckels") {
+            // Buckels 3-pass palette-optimal dithering (async version).
+            const errorBuffer = new Array(targetHeight);
+            for (let y = 0; y < targetHeight; y++) {
+                errorBuffer[y] = new Array(pixelWidth);
+                for (let x = 0; x < pixelWidth; x++) {
+                    errorBuffer[y][x] = [0, 0, 0];
+                }
+            }
+
+            const BATCH_SIZE = 10;
+
+            for (let batchStart = 0; batchStart < targetHeight; batchStart += BATCH_SIZE) {
+                if (signal && signal.aborted) {
+                    throw new DOMException('Dithering cancelled', 'AbortError');
+                }
+
+                const batchEnd = Math.min(batchStart + BATCH_SIZE, targetHeight);
+
+                for (let y = batchStart; y < batchEnd; y++) {
+                    const scanline = buckelsDitherScanline(
+                        pixels, errorBuffer, y, targetWidth, pixelWidth, this
+                    );
+                    screen.set(scanline, y * targetWidth);
+                }
+
+                if (progressCallback) {
+                    progressCallback(batchEnd, targetHeight);
+                }
+
                 if (batchEnd < targetHeight) {
                     await new Promise(resolve => setTimeout(resolve, 0));
                 }
